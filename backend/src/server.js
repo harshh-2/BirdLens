@@ -4,17 +4,20 @@ import {ENV} from "./config/env.js";
 import { favorites, history,birds } from "./db/schema.js";
 import {db} from "./config/db.js";
 import {and,eq,inArray} from 'drizzle-orm';
+import {job} from './config/cron.js';
 
 const app=express();
 const PORT= ENV.PORT;
 app.use(cors());
 app.use(express.json());
-
+if(ENV.NODE_ENV === 'production'){
+    job.start();
+}
 app.get('/api/health',(req,res)=>{
     res.status(200).json({message:"Server is running successfully"});
 });
 
-//favorites endpoint 
+//send to favorites endpoint 
 app.post('/api/favorites', async (req,res)=>{
     try{
         const{user_id,bird_id}=req.body;
@@ -33,6 +36,7 @@ app.post('/api/favorites', async (req,res)=>{
     }
 });
 
+//send to history endpoint
 app.post('/api/history', async (req,res)=>{
     try{
         const{user_id,bird_id}=req.body;
@@ -51,6 +55,7 @@ app.post('/api/history', async (req,res)=>{
     }
 });
 
+//get bird details endpoint
 app.get('/api/bird_details/:bird_id', async (req, res) => {
     try {
         const { bird_id } = req.params;
@@ -68,6 +73,7 @@ app.get('/api/bird_details/:bird_id', async (req, res) => {
     }
 });
 
+//get favorites endpoint
 app.get('/api/favorites/:user_id', async (req, res) => {
     try {
         const {user_id} = req.params;
@@ -88,6 +94,7 @@ app.get('/api/favorites/:user_id', async (req, res) => {
     }
 });
 
+//get history endpoint
 app.get('/api/history/:user_id', async (req, res) => {
     try {
         const {user_id} = req.params;
@@ -109,7 +116,7 @@ app.get('/api/history/:user_id', async (req, res) => {
 });
 
 
-
+//delete from favorites endpoint
 app.delete('/api/favorites', async (req, res) => {
     try {
         const { user_id, bird_id } = req.body;
@@ -124,6 +131,7 @@ app.delete('/api/favorites', async (req, res) => {
     }
 });
 
+//delete all history endpoint
 app.delete('/api/history', async (req, res) => {
     try {
         const { user_id } = req.body;
