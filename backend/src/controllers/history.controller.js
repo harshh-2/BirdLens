@@ -4,9 +4,13 @@ import {eq,and} from 'drizzle-orm';
 
 export const addHistory = async (req,res)=>{
     try{
-        const{user_id,bird_id}=req.body;
-        if(!user_id || !bird_id){
-            return res.status(400).json({message:"Not Identified"});
+        const user_id=req.user.id;
+        if (!user_id) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const{bird_id}=req.body;
+        if(!bird_id){
+            return res.status(400).json({message:"Bird ID is required"});
         }
         const newHistory = await db.insert(history).values({
             user_id,
@@ -22,11 +26,10 @@ export const addHistory = async (req,res)=>{
 
 export const getHistory = async (req, res) => {
     try {
-        const {user_id} = req.params;
+        const user_id = req.user.id;
         if (!user_id) {
-            return res.status(400).json({ message: "User ID is required" });
+            return res.status(401).json({ message: "Unauthorized" });
         }
-        const userHistory = await db.select().from(history).where(eq(history.user_id, user_id));
         const historyBirds = await db.select({history_id: history.id,bird_id: birds.id,name: birds.name,image_url: birds.image_url,viewed_at: history.viewed_at,}).from(history).innerJoin(birds,eq(history.bird_id, birds.id)).where(eq(history.user_id, user_id));
         if (historyBirds.length === 0) {
             return res.status(200).json([]);
@@ -41,9 +44,9 @@ export const getHistory = async (req, res) => {
 
 export const deleteAllHistory = async (req, res) => {
     try {
-        const { user_id } = req.body;
+        const user_id = req.user.id;
         if (!user_id) {
-            return res.status(400).json({ message: "User ID is required" });
+            return res.status(401).json({ message: "Unauthorized" });
         }
         await db.delete(history).where(eq(history.user_id, user_id));
         res.status(200).json({ message: "History removed successfully" });

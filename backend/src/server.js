@@ -5,6 +5,7 @@ import job from './config/cron.js';
 import favoritesRoutes from './routes/favorites.routes.js';
 import historyRoutes from './routes/history.routes.js';
 import birdsRoutes from './routes/birds.routes.js';
+import authRoutes from './routes/auth.routes.js';
 
 const app=express();
 const PORT= ENV.PORT;
@@ -26,6 +27,8 @@ app.use('/api/favorites', favoritesRoutes);
 app.use('/api/history', historyRoutes);
 //send to birds router
 app.use('/api/birds', birdsRoutes);
+//send to auth router
+app.use('/api/auth',authRoutes);
 
 app.listen(PORT, () => {
     console.log("Server is running on port " + PORT);

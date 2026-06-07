@@ -4,7 +4,11 @@ import {eq,and} from 'drizzle-orm';
 
 export const addFavorite = async (req,res)=> {
     try{
-        const{user_id,bird_id}=req.body;
+        const user_id = req.user.id;
+        if (!user_id) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const{bird_id}=req.body;
         if(!user_id || !bird_id){
             return res.status(400).json({message:"Not Identified"});
         }
@@ -22,7 +26,7 @@ export const addFavorite = async (req,res)=> {
 
 export const getFavorites = async (req, res) => {
     try {
-        const {user_id} = req.params;
+        const user_id = req.user.id;
         if (!user_id) {
             return res.status(400).json({ message: "User ID is required" });
         }
@@ -40,8 +44,12 @@ export const getFavorites = async (req, res) => {
 
 export const deleteFavorite = async (req, res) => {
     try {
-        const { user_id, bird_id } = req.body;
-        if (!user_id || !bird_id) {
+        const user_id = req.user.id;
+        if (!user_id) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const { bird_id } = req.body;
+        if (!bird_id) {
             return res.status(400).json({ message: "User ID and Bird ID are required" });
         }
         await db.delete(favorites).where(and(eq(favorites.user_id, user_id), eq(favorites.bird_id, bird_id)));
