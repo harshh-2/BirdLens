@@ -1,0 +1,6 @@
+{
+  "architecture": "mobilenet_v2",
+  "image_size": 224,
+  "num_classes": 50,
+  "best_accuracy": 91.02
+}

@@ -2,27 +2,6 @@ import {db} from "../config/db.js";
 import {history,birds} from "../db/schema.js";
 import {eq,and} from 'drizzle-orm';
 
-export const addHistory = async (req,res)=>{
-    try{
-        const user_id=req.user.id;
-        if (!user_id) {
-            return res.status(401).json({ message: "Unauthorized" });
-        }
-        const{bird_id}=req.body;
-        if(!bird_id){
-            return res.status(400).json({message:"Bird ID is required"});
-        }
-        const newHistory = await db.insert(history).values({
-            user_id,
-            bird_id,
-        }).returning();
-        res.status(201).json(newHistory[0]);
-    }
-    catch(error){
-        console.error("Error adding to history:",error);
-        res.status(500).json({message:"Error connecting to database",error:error.message});
-    }
-};
 
 export const getHistory = async (req, res) => {
     try {

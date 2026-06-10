@@ -1,0 +1,13 @@
+best_model.pth
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+*.pth
+*.pt
+*.h5
+*.ckpt
+.ipynb_checkpoints/
+
+!app/models/birds50_best.pth   

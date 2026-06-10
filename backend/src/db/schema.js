@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp , uuid, primaryKey} from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp , uuid, primaryKey,real} from 'drizzle-orm/pg-core';
 
 export const users= pgTable("users",{
 id: uuid("id").defaultRandom().primaryKey(),
@@ -33,5 +33,7 @@ export const history =pgTable("history",{
     id:serial("id").primaryKey(),
     user_id: uuid("user_id").notNull().references(() => users.id),
     bird_id: uuid("bird_id").notNull().references(() => birds.id),
-    viewed_at: timestamp("viewed_at").defaultNow().notNull(),
+    confidence: real("confidence").notNull(),
+    uploaded_image_url: text("uploaded_image_url"),
+    predicted_at: timestamp("predicted_at").defaultNow().notNull(),
 })
