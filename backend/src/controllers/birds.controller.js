@@ -2,6 +2,8 @@ import {db} from "../config/db.js";
 import {birds,history} from "../db/schema.js";
 import {eq} from 'drizzle-orm';
 import { predictFromML } from "../services/ml.service.js";
+import { enrichBird ,enrichBirds} from "../utils/birdResponse.js";
+
 
 export const getAllBirds = async (req, res) => {
     try {
@@ -9,11 +11,12 @@ export const getAllBirds = async (req, res) => {
         if (!bird_id) {
             return res.status(400).json({ message: "Bird ID is required" });
         }
-        const birdDetails = await db.select().from(birds).where(eq(birds.id, bird_id));
-        if (birdDetails.length === 0) {
+        const bird = await db.select().from(birds).where(eq(birds.id, bird_id));
+        if (bird.length === 0) {
             return res.status(404).json({ message: "Bird not found" });
         }
-        res.status(200).json(birdDetails[0]);
+         const birdDetails = await enrichBird(bird[0]);
+        return res.status(200).json(birdDetails);
     } catch (error) {
         console.error("Error fetching bird details:", error);
         res.status(500).json({ message: "Error connecting to database", error: error.message });
@@ -37,14 +40,13 @@ export const predictBirds = async(req,res)=>{
             message: "Bird not found"
             });
         }
-        const birdRecord = bird[0];
+        const birdRecord = await enrichBird(bird[0]);
         if (req.user?.id) {
             await db.insert(history).values({
                     user_id: req.user.id,
                     bird_id: birdRecord.id,
                     confidence:
-                        prediction.confidence.toString(),
-                    uploaded_image_url: null
+                        prediction.confidence,
                 });
         }
         return res.status(200).json({

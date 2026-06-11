@@ -1,0 +1,1 @@
+ALTER TABLE "history" DROP COLUMN "aws_user_image_key";

@@ -15,6 +15,20 @@
       "when": 1781079527740,
       "tag": "0001_amused_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781169362283,
+      "tag": "0002_premium_ikaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781179093797,
+      "tag": "0003_unknown_guardian",
+      "breakpoints": true
     }
   ]
 }

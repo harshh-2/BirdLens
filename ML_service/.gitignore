@@ -9,5 +9,5 @@ venv/
 *.h5
 *.ckpt
 .ipynb_checkpoints/
-
+app/utils/upload_images.py
 !app/models/birds50_best.pth   

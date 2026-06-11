@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp , uuid, primaryKey,real} from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp , uuid, primaryKey,real,index} from 'drizzle-orm/pg-core';
 
 export const users= pgTable("users",{
 id: uuid("id").defaultRandom().primaryKey(),
@@ -13,7 +13,7 @@ export const birds= pgTable("birds",{
 id: uuid("id").defaultRandom().primaryKey(),
 name: text("name").notNull().unique(),
 description: text("description"),
-image_url: text("image_url"),
+aws_image_key: text("aws_image_key"),
 scientific_name: text("scientific_name"),
 habitat: text("habitat"),
 conservation_status: text("conservation_status"),
@@ -34,6 +34,7 @@ export const history =pgTable("history",{
     user_id: uuid("user_id").notNull().references(() => users.id),
     bird_id: uuid("bird_id").notNull().references(() => birds.id),
     confidence: real("confidence").notNull(),
-    uploaded_image_url: text("uploaded_image_url"),
     predicted_at: timestamp("predicted_at").defaultNow().notNull(),
-})
+  },
+  (table) => ({userIdx: index("history_user_idx").on(table.user_id),})
+);

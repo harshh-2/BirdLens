@@ -1,7 +1,7 @@
 import {db} from "../config/db.js";
 import {favorites,birds} from "../db/schema.js";
 import {eq,and} from 'drizzle-orm';
-
+import { enrichBird,enrichBirds } from "../utils/birdResponse.js";
 export const addFavorite = async (req,res)=> {
     try{
         const user_id = req.user.id;
@@ -30,11 +30,14 @@ export const getFavorites = async (req, res) => {
         if (!user_id) {
             return res.status(400).json({ message: "User ID is required" });
         }
-        const favoriteBirds = await db.select({bird_id: birds.id,name: birds.name,image_url: birds.image_url,created_at: favorites.created_at,}).from(favorites).innerJoin(birds,eq(favorites.bird_id, birds.id)).where(eq(favorites.user_id, user_id));
-        if (favoriteBirds.length === 0) {
+        const favoriteBirdsRaw = await db.select({bird_id: birds.id,name: birds.name,aws_image_key: birds.aws_image_key,created_at: favorites.created_at,}).from(favorites).innerJoin(birds,eq(favorites.bird_id, birds.id)).where(eq(favorites.user_id, user_id));
+        if (favoriteBirdsRaw.length === 0) {
         return res.status(200).json([]);
         }
-        res.status(200).json(favoriteBirds);
+
+        const favoriteBirds=await enrichBirds(favoriteBirdsRaw);
+
+        return res.status(200).json(favoriteBirds);
     }
     catch (error) {
         console.error("Error fetching favorites:", error);
