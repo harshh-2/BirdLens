@@ -426,24 +426,6 @@ flutter run
 
 ---
 
-## Engineering Assessment
-
-| Area | Score |
-|---|---|
-| Backend engineering | 8.0 / 10 |
-| Machine learning | 7.5 / 10 |
-| Cloud engineering | 7.5 / 10 |
-| Frontend architecture | 8.0 / 10 |
-| Database design | 8.5 / 10 |
-| Security & privacy | 7.5 / 10 |
-| System design | 8.5 / 10 |
-| Production readiness | 6.5 / 10 |
-| Portfolio impact | 9.0 / 10 |
-
-BirdLens is best understood as a production-oriented engineering case study built around an applied ML feature. Its strongest contribution is not the 91.02% model accuracy — it is the complete, defensible system around that model: cross-platform client, secure identity, dedicated inference microservice, normalized relational schema, private cloud storage, temporary signed image delivery, and privacy-by-design non-persistence of uploads.
-
----
-
 ## Roadmap
 
 **Reliability phase (next)**
