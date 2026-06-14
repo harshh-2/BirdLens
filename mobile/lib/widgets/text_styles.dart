@@ -18,7 +18,7 @@ Widget Normal16Text({required String text}){
             text,
             textAlign: TextAlign.center,
             style: TextStyle(
-            color:colors['textLight'],
+            color:colors['text'],
             fontWeight: FontWeight.normal,
             fontSize: 16
                 ),

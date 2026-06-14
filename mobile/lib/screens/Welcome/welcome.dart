@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:birdlens/themes/app_colors.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:birdlens/widgets/widgets.dart';
-import 'package:go_router/go_router.dart';
-
+import 'package:birdlens/screens/auth/signin.dart';
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({Key? key}) : super(key: key);
   @override
@@ -15,9 +13,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     int currentPage=0;
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return Container(
+      color: colors['primary'],
+    child:SafeArea(
+      child:Scaffold(
       backgroundColor: colors['background'],
-      body: Stack(
+      body: Container(
+        margin: EdgeInsets.only(top:30),
+      child:Stack(
       children:[
         PageView(
           controller: _pageController,
@@ -54,32 +57,25 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               description: "Join BirdLens and start discovering birds around you.",
               buttonText: "Get Started",
               onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-              content: Text("Login screen coming soon"),
-              ),
-            );
+              Navigator.pushNamed(context, "/signIn");
               },
             ),
           ],
         ),
-        Positioned(
-  bottom: 130,
-  left: 0,
-  right: 0,
-  child: Row(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: List.generate(
-      3,
-      (index) => Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        width: currentPage == index ? 20 : 8,
-        height: 8,
-        decoration: BoxDecoration(
-          color: currentPage == index
-              ? colors['primary']
-              : Colors.grey.shade300,
-          borderRadius: BorderRadius.circular(20),
+           Positioned(
+                  bottom: 130,
+                  left: 0,
+                  right: 0,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(3,
+                    (index) => Container(
+                     margin: const EdgeInsets.symmetric(horizontal: 4),
+                     width: currentPage == index ? 20 : 8,
+                     height: 8,
+                    decoration: BoxDecoration(
+                    color: currentPage == index ? colors['primary'] : Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(20),
         ),
       ),
     ),
@@ -87,6 +83,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 )
       ]
       ),
+      ),
+    ),
+    ),
     );
   }
   @override

@@ -1,774 +1,742 @@
-# BirdLens Training Notebooks
+# 🧠 BirdLens — Model Training
 
-Complete guide to training the BirdLens bird species classification model using PyTorch and Google Colab. This notebook implements transfer learning with MobileNetV2 to achieve **91.02% accuracy** on 50 bird species.
-
-## 📓 Notebook Overview
-
-### `training.ipynb`
-A comprehensive Jupyter notebook that demonstrates the complete machine learning pipeline from data preparation to model evaluation. Designed to run on Google Colab with GPU acceleration for optimal training speed.
-
-**Execution Time**: ~15-20 minutes on GPU, ~1-2 hours on CPU
-
-## 🎯 Learning Objectives
-
-By working through this notebook, you'll learn:
-
-1. **Dataset Management**: Download and prepare large datasets from Kaggle
-2. **Data Augmentation**: Apply effective augmentation strategies
-3. **Transfer Learning**: Fine-tune pretrained models
-4. **Training Loop**: Implement custom training with validation
-5. **Model Optimization**: Use learning rate scheduling and regularization
-6. **Evaluation**: Assess model performance and identify improvements
-
-## 📊 Notebook Structure
-
-### Cell 1: Imports
-**Purpose**: Load all necessary libraries
-
-```python
-Key Libraries:
-- kagglehub: Download Kaggle datasets
-- torch/torchvision: Deep learning framework
-- matplotlib: Visualization
-- random: Dataset selection
-```
-
-**Why These Libraries?**
-- `kagglehub`: Seamless dataset access
-- `torch`: Industry-standard deep learning
-- `torchvision`: Computer vision utilities
-- `matplotlib`: Training visualization
+> **Reproducible MobileNetV2 transfer-learning pipeline that converts a 220-category bird dataset into a focused 50-class production classifier. Trains, evaluates, and exports all artifacts required by the FastAPI inference service.**
 
 ---
 
-### Cell 2: Dataset Download & Selection
-**Purpose**: Download and prepare 50-class bird dataset
+## 📑 Table of Contents
 
-**What Happens:**
-1. Downloads 220-class bird dataset from Kaggle (~500MB)
-2. Randomly selects 50 bird species
-3. Creates train/test split directories
-4. Saves selected classes for reproducibility
-
-**Key Parameters:**
-```python
-- Random seed: 42 (reproducibility)
-- Selected classes: 50 (computational efficiency)
-- Total dataset: ~50,000+ images
-```
-
-**Output:**
-- `Birds50/Train/`: Training images organized by species
-- `Birds50/Test/`: Test images organized by species
-- `selected_classes.json`: List of selected species for reference
-
-**Challenges Addressed:**
-- Full 220-class dataset is too large for training constraints
-- Random selection ensures diverse bird representation
-- Train/test split prevents data leakage
+- [Purpose & Outputs](#-purpose--outputs)
+- [Quick Start](#-quick-start)
+- [Pipeline Walkthrough](#️-pipeline-walkthrough)
+- [Training Configuration](#-training-configuration)
+- [Model Architecture](#-model-architecture)
+- [Training Loop](#-training-loop)
+- [Exported Artifacts](#-exported-artifacts)
+- [Reproducibility & Data Integrity](#-reproducibility--data-integrity)
+- [Evaluation & Model Governance](#-evaluation--model-governance)
+- [Running the Notebook](#-running-the-notebook)
+- [Known Limitations & Next Experiments](#-known-limitations--next-experiments)
+- [Troubleshooting](#-troubleshooting)
 
 ---
 
-### Cell 3: Data Augmentation & Loading
-**Purpose**: Prepare data loaders with augmentation
+## 🎯 Purpose & Outputs
 
-**Training Augmentations:**
-```python
-1. Resize → 224×224 (MobileNetV2 input requirement)
-2. RandomHorizontalFlip (50% probability)
-   └─ Handles birds facing both directions
-3. RandomRotation (±15 degrees)
-   └─ Captures various poses
-4. AutoAugment (ImageNet policy)
-   └─ Automatic augmentation selection
-   └─ Includes: color, geometric transformations
-5. ToTensor → Convert to PyTorch tensor
-6. Normalize → ImageNet statistics (mean, std)
+`training.ipynb` is the **source of truth for every artifact** served by `ML_service`. It does not just train a model — it defines the complete deployment artifact set and the cross-system naming contract.
+
+### What the Notebook Produces
+
+```
+training.ipynb
+      │
+      ├─ birds50_best.pth          ← Best model weights (saved when accuracy improves)
+      │
+      ├─ class_names.json          ← Index → species name map (CRITICAL cross-service key)
+      │
+      └─ selected_classes.json     ← Records which 50 classes were sampled (reproducibility)
 ```
 
-**Why This Augmentation?**
-- Horizontal flip: Birds face left and right
-- Rotation: Captures perched and tilted birds
-- AutoAugment: Proven to improve generalization
-- Normalization: Matches ImageNet pretraining
+### Artifact Consumers
 
-**Test Augmentations:**
-```python
-1. Resize → 224×224
-2. ToTensor
-3. Normalize (same statistics)
-└─ NO augmentation (preserve original info)
-```
+| Artifact | Consumer | Why it Matters |
+|----------|----------|---------------|
+| `birds50_best.pth` | FastAPI inference service | The actual model weights |
+| `class_names.json` | FastAPI + PostgreSQL seeding | Maps model output indices to species strings |
+| `selected_classes.json` | Engineers / retraining workflow | Records sampled class provenance |
 
-**Important Insight**: Training augmentation prevents overfitting; test augmentation is minimal to ensure fair evaluation.
-
-**Datasets Created:**
-```python
-train_dataset: ImageFolder(root=train_path, transform=train_transform)
-test_dataset: ImageFolder(root=test_path, transform=transform)
-
-Expected counts:
-- train_dataset: ~25,000 images (50 classes)
-- test_dataset: ~5,000 images (50 classes)
-```
+> 🔗 **The exported class-name order is operationally critical.** The classifier uses array index to decode logits. The backend uses the resulting string to query `birds.name`. A single character difference breaks metadata enrichment silently.
 
 ---
 
-### Cell 4: Sample Visualization
-**Purpose**: Visualize augmented training images
+## ⚡ Quick Start
 
-```python
-Displays a random training image after augmentation
-Useful for verifying augmentation pipeline
-```
-
----
-
-### Cell 5: DataLoader Setup
-**Purpose**: Create batches for training
-
-**DataLoader Configuration:**
-```python
-Training DataLoader:
-- batch_size: 32 (balanced for system resources)
-- shuffle: True (random order prevents bias)
-- num_workers: 2 (parallel data loading)
-- pin_memory: True (memory optimization)
-
-Test DataLoader:
-- batch_size: 32
-- shuffle: False (deterministic evaluation)
-- num_workers: 2
-- pin_memory: True
-```
-
-**Why These Settings?**
-- **Batch Size 32**: Good balance between gradient noise and memory efficiency
-- **Shuffle**: Randomizes training to prevent pattern memorization
-- **num_workers=2**: Parallel I/O speeds up loading
-- **pin_memory**: Optimizes memory transfers
-
-**Outputs:**
-```python
-images.shape: (32, 3, 224, 224) [batch_size, channels, height, width]
-labels.shape: (32,) [batch_size]
-```
-
----
-
-### Cell 6: Model Architecture Setup
-**Purpose**: Load pretrained MobileNetV2 and adapt for 50 classes
-
-**Architecture Details:**
-```python
-weights = MobileNet_V2_Weights.DEFAULT
-    └─ ImageNet-pretrained weights (1.3M images, 1000 classes)
-
-model = mobilenet_v2(weights=weights)
-    └─ Pretrained backbone retained
-
-model.classifier[1] = nn.Linear(1280, 50)
-    └─ Replace final layer for 50 classes
-    └─ Trainable parameters: ~65K
-
-model.classifier:
-├── Dropout (p=0.5)
-├── Linear(1280 → 50)  [NEW - randomly initialized]
-└── Output: 50 logits
-```
-
-**Transfer Learning Strategy:**
-1. **Frozen Backbone**: Keep feature extractor weights
-2. **Trainable Head**: Only update classification layer
-3. **Benefit**: Requires less data, faster convergence, better generalization
-
-**Parameter Summary:**
-```
-Total Parameters: 3.5M
-Trainable Parameters: ~65K (only final layer)
-Frozen Parameters: 3.4M (backbone)
-
-This 65K:3.5M ratio is ideal for fine-tuning
-```
-
----
-
-### Cell 7: Device Setup
-**Purpose**: Configure GPU/CPU execution
-
-**Device Detection:**
-```python
-device = auto-detected (GPU if available, CPU otherwise)
-```
-
-**Automatic Fallback:** Code gracefully handles both GPU and CPU environments
-
----
-
-### Cell 8: GPU Information
-**Purpose**: Verify GPU availability
-
-**Checks:**
-```python
-- torch.cuda.is_available() → Boolean
-- torch.cuda.device_count() → Number of GPUs
-- torch.cuda.get_device_name(0) → GPU model
-```
-
-**Cloud Notebook Environment:**
-- GPU acceleration available
-- Refer to cloud provider documentation for current hardware options
-
----
-
-### Cell 9: Optimizer & Loss Setup
-**Purpose**: Configure training optimization
-
-**Loss Function:**
-```python
-criterion = nn.CrossEntropyLoss()
-    └─ Standard for multi-class classification
-    └─ Combines LogSoftmax + NLLLoss
-    └─ Handles 50-class problem
-```
-
-**Optimizer Configuration:**
-```python
-optimizer = AdamW(
-    model.parameters(),
-    lr=3e-4,      # Conservative for pretrained weights
-    weight_decay=1e-2  # L2 regularization
-)
-```
-
-**Why AdamW?**
-1. **Adaptive Learning Rate**: Per-parameter LR tuning
-2. **Decoupled Weight Decay**: Proper L2 regularization
-3. **Better for Fine-tuning**: Prevents destroying pretrained weights
-4. **Momentum**: Accelerates convergence
-
-**Learning Rate Choice (3e-4):**
-- Standard Adam: 1e-3 (too aggressive for fine-tuning)
-- Our choice: 3e-4 (safe for pretrained weights)
-- Conservative approach prevents catastrophic forgetting
-
-**Weight Decay (1e-2):**
-- Acts as L2 regularization: λ = 0.01
-- Prevents overfitting by penalizing large weights
-- Especially important with limited data (50 classes)
-
-**Parameter Analysis:**
-```
-Trainable: ~65,000
-Total: 3,500,000
-Ratio: 1.9% trainable
-```
-
-This small trainable ratio means:
-- Fast training
-- Less prone to overfitting
-- Effective transfer of ImageNet knowledge
-
----
-
-### Cell 10: Evaluation Function
-**Purpose**: Assess model performance on test set
-
-**Evaluation Process:**
-```python
-def evaluate(model, dataloader, device):
-    1. Set model to eval mode (disable dropout, etc.)
-    2. Iterate through all test batches
-    3. Forward pass (no gradients)
-    4. Get predictions (argmax of outputs)
-    5. Compare with ground truth
-    6. Calculate accuracy (correct/total)
-    
-    Returns: accuracy (0-100%)
-```
-
-**Why No Gradients?**
-- `torch.no_grad()`: Saves memory and computation
-- Prevents accidental gradient accumulation
-- ~50% faster evaluation
-
-**Key Metrics Computed:**
-```python
-correct: Number of correct predictions
-total: Total samples evaluated
-accuracy: (correct / total) * 100
-```
-
-**Important Detail**: Uses `torch.max()` to get highest probability class
-
----
-
-### Cell 11: Training Loop
-**Purpose**: Train the model for 10 epochs
-
-**Training Configuration:**
-```python
-EPOCHS = 10
-scheduler = CosineAnnealingLR(optimizer, T_max=10)
-```
-
-**Each Epoch Consists of:**
-
-**1. Training Phase:**
-```python
-for images, labels in train_loader:
-    1. Move to device (GPU/CPU)
-    2. Forward pass → model(images)
-    3. Compute loss → criterion(outputs, labels)
-    4. Backward pass → loss.backward()
-    5. Optimizer step → optimizer.step()
-    6. Accumulate loss
-```
-
-**2. Validation Phase:**
-```python
-val_acc = evaluate(model, test_loader, device)
-```
-
-**3. Checkpointing:**
-```python
-if val_acc > best_acc:
-    Save model weights to "birds50_best.pth"
-```
-
-**4. Learning Rate Update:**
-```python
-scheduler.step()  # Adjust learning rate following cosine schedule
-```
-
-### Learning Rate Schedule (CosineAnnealingLR)
+### Recommended: Google Colab (GPU)
 
 ```
-LR over epochs:
-Epoch  1: 3e-4 (start)
-Epoch  3: 2.5e-4
-Epoch  5: 1.8e-4
-Epoch  7: 9e-5
-Epoch  9: 2e-5
-Epoch 10: 1e-5 (near zero)
-
-Formula: lr = lr_max * (1 + cos(π * epoch / T_max)) / 2
+1. Upload training.ipynb to Google Colab
+2. Runtime → Change runtime type → GPU (T4 is sufficient)
+3. Run all cells in order
+4. Review: selected classes printout + sample image visualization
+5. Wait for 10-epoch training loop to complete
+6. Download all three exported artifacts together
+7. Move artifacts to ML_service/app/models/
 ```
 
-**Why Cosine Annealing?**
-1. **Smooth Decay**: No sudden drops
-2. **Exploration to Exploitation**: Gradual LR reduction
-3. **Better Convergence**: Proven empirically
-4. **Prevents Oscillation**: Leads to stable final weights
+### Local Environment
 
-**Typical Training Output:**
-```
-Epoch 1/10 | LR: 0.0003000 | Loss: 1.8543 | Val Acc: 78.23%
-Epoch 2/10 | LR: 0.0002987 | Loss: 1.2345 | Val Acc: 84.56%
-Epoch 3/10 | LR: 0.0002952 | Loss: 0.9876 | Val Acc: 87.89%
-...
-Epoch 8/10 | LR: 0.0000789 | Loss: 0.2345 | Val Acc: 91.02%
-Epoch 9/10 | LR: 0.0000234 | Loss: 0.1876 | Val Acc: 90.89%
-Epoch 10/10 | LR: 0.0000012 | Loss: 0.1345 | Val Acc: 90.78%
-```
-
-**Key Observations:**
-- Loss decreases (model learning)
-- Accuracy increases (convergence)
-- Best model typically saved around epoch 8
-- Final epochs may show overfitting (val_acc slightly decreases)
-
----
-
-### Cell 12: Save & Export
-**Purpose**: Save trained model and metadata
-
-**Output Files:**
-```
-The training process generates essential artifacts:
-
-1. Model weights file
-   └─ Contains trained model parameters
-   └─ Used for inference and deployment
-
-2. Class mapping file
-   └─ Maps indices to bird species names
-   └─ Required for prediction decoding
-
-3. Configuration files
-   └─ Store selected species and metadata
-   └─ Support reproducibility and documentation
-```
-
-**Export Process:**
-Generated artifacts are saved locally for deployment to production inference services.
-
----
-
-## 📈 Expected Results
-
-### Training Progression
-```
-Epoch 1-3: Rapid improvement (70% → 85% accuracy)
-           └─ Model learns general bird features
-
-Epoch 4-7: Steady improvement (85% → 90%)
-           └─ Fine-tunes discriminative features
-
-Epoch 8+: Diminishing returns (90% → 91.02%)
-          └─ Convergence plateau reached
-```
-
-### Final Accuracy
-- **Best Validation Accuracy**: 91.02%
-- **Typical Range**: 90.5% - 91.5%
-- **Typical Best Epoch**: 8-10
-
-### Confusion Patterns
-```
-Commonly Confused:
-- Similar plumage: Warblers (multiple species)
-- Size variation: Sparrows
-- Seasonal changes: Molting birds
-- Similar colors: Red cardinals vs finches
-```
-
-## 🚀 How to Run
-
-### Option 1: Cloud Notebook Environment (Recommended)
-
-1. **Create a cloud notebook**
-   - Use your preferred cloud provider's notebook service
-   - Upload `training.ipynb`
-
-2. **Enable GPU (Optional)**
-   - Configure runtime settings
-   - Select GPU acceleration for faster training
-
-3. **Run All Cells**
-   - Menu → Runtime → Run All
-   - Wait 15-20 minutes for completion
-   - Download generated files
-
-### Option 2: Local Jupyter Notebook
-
-1. **Install Dependencies**
 ```bash
+cd notebooks
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-2. **Start Jupyter**
-```bash
 jupyter notebook training.ipynb
 ```
 
-3. **Run Cells Sequentially**
-```python
-# Cell 1: Imports
-# Cell 2: Download dataset (requires proper authentication configuration)
-# Cell 3: Augmentation & Loading
-# ...
-# Cell 11: Training Loop
-# Cell 12: Export
+> ⚠️ The notebook contains Colab-specific paths (`/content/...`) and `google.colab` download helpers. Local execution requires adapting these paths and the artifact download cells.
+
+### After Training: Artifact Handoff Checklist
+
+```
+□ Place birds50_best.pth      → ML_service/app/models/
+□ Place class_names.json      → ML_service/app/models/
+□ Place selected_classes.json → ML_service/app/models/
+□ Update model_config.json with verified accuracy, class count, input size
+□ Confirm: len(class_names.json) == 50
+□ Confirm: final classifier output size == 50
+□ Confirm: all 50 class strings exist in PostgreSQL birds.name
+□ Run inference smoke tests before deploying
 ```
 
-**Note:** GPU acceleration is recommended for reasonable training time.
+---
 
-### Option 3: Command Line (Advanced)
+## 🔧 Pipeline Walkthrough
 
-```bash
-# Convert notebook to script
-jupyter nbconvert --to script training.ipynb
+The training notebook executes 8 sequential stages:
 
-# Run training
-python training.py
+### Stage 1 — Imports & Environment
+
+```python
+# Core dependencies
+import torch, torchvision         # Model and transforms
+import kagglehub                  # Dataset retrieval
+from torchvision import datasets  # Folder-based image loading
+import random, shutil, json       # Utility and artifact export
+import matplotlib.pyplot as plt   # Sample visualization
 ```
 
-## ⚙️ Customization Guide
+---
 
-### Adjust Dataset Size
-```python
-# Cell 2: Change number of selected classes
-selected_classes = random.sample(all_classes, 100)  # 100 instead of 50
+### Stage 2 — Dataset Download & Class Selection
+
+**Source dataset:**
+```
+kedarsai/bird-species-classification-220-categories
 ```
 
-**Implications:**
-- More classes → Lower accuracy initially
-- Requires more training data
-- Longer training time
+**Selection process:**
+```
+All 220 class folders
+        │
+        ▼
+Sort alphabetically (deterministic ordering)
+        │
+        ▼
+random.seed(42)
+        │
+        ▼
+random.sample(all_classes, 50)   ← 50 random classes
+        │
+        ▼
+Copy Train/ and Test/ folders → /content/Birds50/
+```
 
-### Change Model Architecture
+**Why 50 classes?**
+
+| Reason | Detail |
+|--------|--------|
+| Reduces training cost | 10× fewer classes = faster iterations |
+| Manageable proof of concept | Complete end-to-end system without full-scale complexity |
+| Smaller deployment artifacts | Lighter model, smaller class maps |
+| Focus on architecture quality | Value is the full system, not maximizing species count |
+
+> ⚠️ The selection is **random, not curated** — class similarity, geographic usefulness, and visual difficulty are not explicitly optimized. A production-quality dataset would apply domain curation.
+
+---
+
+### Stage 3 — Augmentation Strategy
+
+**Training transforms** (applied per-batch, random each epoch):
+
+```
+┌──────────────────────────────────────────────────────┐
+│  INPUT: Raw bird image (variable size)               │
+└──────────────────────┬───────────────────────────────┘
+                       │
+                       ▼
+              Resize(224 × 224)            ← Fixed input size for MobileNetV2
+                       │
+                       ▼
+          RandomHorizontalFlip(p=0.5)      ← Handles left/right-facing birds
+                       │
+                       ▼
+          RandomRotation(±15°)             ← Handles angled photographs
+                       │
+                       ▼
+     AutoAugment(ImageNet policy)          ← Learned augmentation strategy:
+                       │                    color jitter, shear, posterize, etc.
+                       ▼
+                  ToTensor()               ← [H,W,C] uint8 → [C,H,W] float32 ∈ [0,1]
+                       │
+                       ▼
+       Normalize(ImageNet mean/std)        ← mean=[0.485,0.456,0.406]
+                       │                    std =[0.229,0.224,0.225]
+                       ▼
+              ┌─────────────────┐
+              │  Training Batch │
+              └─────────────────┘
+```
+
+**Test transforms** (deterministic — no randomness):
+
+```
+Resize(224 × 224) → ToTensor() → Normalize(ImageNet stats)
+```
+
+> ℹ️ Test and inference preprocessing **must stay identical** to avoid distribution mismatch between evaluation and deployment.
+
+---
+
+### Stage 4 — Data Loaders
+
 ```python
-# Cell 6: Replace MobileNetV2 with EfficientNet
-from torchvision.models import efficientnet_b0
+DataLoader(
+    train_dataset,
+    batch_size=32,
+    shuffle=True,      # Randomize order each epoch
+    num_workers=2,
+    pin_memory=True    # Faster GPU transfers
+)
 
-model = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
+DataLoader(
+    test_dataset,
+    batch_size=32,
+    shuffle=False,     # Deterministic evaluation order
+    num_workers=2,
+    pin_memory=True
+)
+```
+
+---
+
+### Stage 5 — Model Adaptation (Transfer Learning)
+
+```
+MobileNetV2 (ImageNet pretrained)
+       │
+       │  All convolutional feature layers
+       │  ↑ Pretrained on 1.2M ImageNet images
+       │  ↑ Learns edges → textures → parts → objects
+       │
+       ▼
+┌─────────────────────────────────────┐
+│  Original Classifier Head           │
+│  Dropout → Linear(1280, 1000)       │
+│  (ImageNet 1000 classes)            │
+└──────────────────┬──────────────────┘
+                   │  REPLACED WITH:
+                   ▼
+┌─────────────────────────────────────┐
+│  New Classifier Head                │
+│  Dropout → Linear(1280, 50)         │  ← 50 bird species
+└─────────────────────────────────────┘
+```
+
+**Transfer learning note:**
+
+```python
 model.classifier[1] = nn.Linear(1280, num_classes)
 ```
 
-**Architecture Comparison:**
-| Feature | MobileNetV2 | EfficientNet |
-|---------|------------|-------------|
-| Accuracy | 91% | 92-93% |
-| Speed | Fast | Slower |
-| Memory | Low | High |
-| Training Time | 15min | 30min |
+> ⚠️ The checked-in notebook does **not** explicitly freeze backbone parameters (`requires_grad = False`). The actual training fine-tunes all parameters. Experiment reports should state which strategy was used — full fine-tuning vs. head-only vs. staged unfreezing.
 
-### Adjust Hyperparameters
+| Strategy | Speed | Overfitting Risk | Typical Accuracy |
+|---------|-------|-----------------|-----------------|
+| Head-only (frozen backbone) | Fastest | Lowest | Good baseline |
+| Staged unfreezing | Medium | Medium | Often best |
+| Full fine-tuning (current) | Slowest | Highest | Potentially highest |
+
+---
+
+### Stage 6 — Optimization Setup
+
 ```python
-# Cell 9: Optimizer settings
+criterion = nn.CrossEntropyLoss()
+
 optimizer = AdamW(
     model.parameters(),
-    lr=1e-3,          # Increase for faster learning
-    weight_decay=2e-2 # Increase for more regularization
+    lr=3e-4,
+    weight_decay=1e-2
 )
 
-# Cell 11: Training parameters
-EPOCHS = 20  # More epochs
-batch_size = 64  # Larger batches
+scheduler = CosineAnnealingLR(
+    optimizer,
+    T_max=10        # Cosine cycle over full training run
+)
 ```
 
-### Modify Augmentation
+**Learning rate schedule over 10 epochs:**
+
+```
+LR
+3e-4 │ ╲
+     │  ╲
+     │   ╲
+     │    ╲
+     │     ╲
+     │      ╲
+     │       ╲___
+0    └─────────────────
+     0        5       10  Epoch
+       (cosine decay to near 0)
+```
+
+**Why these choices?**
+
+| Choice | Reason |
+|--------|--------|
+| AdamW | Decoupled weight decay — more principled than Adam for generalization |
+| lr = 3e-4 | Standard good starting point for transfer learning fine-tuning |
+| weight_decay = 1e-2 | Regularizes to reduce overfitting on 50-class subset |
+| CosineAnnealing | Smooth LR decay — avoids abrupt drops, often better final accuracy |
+| CrossEntropyLoss | Standard multi-class classification loss |
+
+---
+
+### Stage 7 — Training Loop
+
+```
+For each of 10 epochs:
+       │
+       ├─ model.train()  — enable dropout, batch norm in train mode
+       │
+       ├─ For each batch in train_loader:
+       │     │
+       │     ├─ Forward pass: logits = model(images)
+       │     ├─ Compute loss: CrossEntropyLoss(logits, labels)
+       │     ├─ Backward pass: loss.backward()
+       │     └─ Parameter update: optimizer.step()
+       │
+       ├─ model.eval() + torch.no_grad()
+       │
+       ├─ Evaluate accuracy on test_loader
+       │     └─ accuracy = correct / total × 100
+       │
+       ├─ If accuracy > best_accuracy:
+       │     └─ Save checkpoint → birds50_best.pth  ✅
+       │
+       └─ scheduler.step()  — advance cosine LR
+```
+
+**Reported best accuracy: 91.02%**
+
+---
+
+### Stage 8 — Export
+
 ```python
-# Cell 3: Add more augmentations
-train_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.RandomHorizontalFlip(p=0.7),  # Increase probability
-    transforms.RandomRotation(degrees=30),   # Increase rotation
-    transforms.ColorJitter(brightness=0.2, contrast=0.2),  # Add color jitter
-    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),  # Add translation
-    transforms.AutoAugment(transforms.AutoAugmentPolicy.IMAGENET),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225])
-])
+# 1. Best model weights
+torch.save(model.state_dict(), "birds50_best.pth")
+
+# 2. Class name mapping (sorted dataset class order)
+class_names = train_dataset.classes  # Must match training index order
+with open("class_names.json", "w") as f:
+    json.dump(class_names, f)
+
+# 3. Original sampled class list
+with open("selected_classes.json", "w") as f:
+    json.dump(selected_classes, f)
 ```
 
-## 📊 Visualization & Analysis
+---
 
-### Generate Training Curves
+## ⚙️ Training Configuration
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Source categories | 220 | Full Kaggle dataset |
+| Selected categories | **50** | Random sample, seed=42 |
+| Class selection seed | `42` | Reproducible |
+| Architecture | MobileNetV2 | ImageNet pretrained |
+| Input size | `224 × 224 × 3` (RGB) | |
+| Batch size | 32 | |
+| Epochs | **10** | |
+| Loss function | CrossEntropyLoss | |
+| Optimizer | **AdamW** | |
+| Learning rate | `3e-4` | |
+| Weight decay | `1e-2` | |
+| Scheduler | **CosineAnnealingLR** | T_max=10 |
+| Augmentation | RandomHFlip + Rotation + AutoAugment | |
+| Reported best accuracy | **91.02%** | On test split |
+
+---
+
+## 🏛️ Model Architecture
+
+```
+Input: [batch, 3, 224, 224]
+       │
+       ▼
+MobileNetV2 Feature Extractor
+├─ Initial Conv2d (32 filters, stride 2)
+├─ 17× Inverted Residual Blocks
+│   ├─ Depthwise separable convolutions
+│   ├─ Linear bottlenecks
+│   └─ Skip connections (same shape)
+├─ Final Conv2d (1280 filters)
+└─ AdaptiveAvgPool2d → [batch, 1280]
+       │
+       ▼
+Classifier Head
+├─ Dropout(p=0.2)
+└─ Linear(1280 → 50)
+       │
+       ▼
+Output: [batch, 50] logits
+       │
+       ▼
+Softmax → Probabilities [batch, 50]
+       │
+       ▼
+argmax → predicted class index
+       │
+       ▼
+class_names[index] → "Baird_Sparrow"
+```
+
+**Why MobileNetV2?**
+
+| Criterion | MobileNetV2 |
+|-----------|------------|
+| Parameters | ~3.4M (lightweight) |
+| Inference speed | Fast on CPU |
+| Memory footprint | Small |
+| Accuracy on fine-grained tasks | Competitive for 50 classes |
+| Mobile deployment suitability | Excellent |
+| Available in torchvision | ✅ |
+
+---
+
+## 🔄 Training Loop
+
+```
+Epoch 1 of 10
+     train_loss: 1.2341   test_acc: 72.4%
+     ↳ New best! Saved birds50_best.pth ✅
+
+Epoch 2 of 10
+     train_loss: 0.8821   test_acc: 81.7%
+     ↳ New best! Saved birds50_best.pth ✅
+
+Epoch 3 of 10
+     train_loss: 0.6543   test_acc: 85.3%
+     ↳ New best! Saved birds50_best.pth ✅
+
+...
+
+Epoch N of 10
+     train_loss: 0.3102   test_acc: 91.02%
+     ↳ New best! Saved birds50_best.pth ✅
+```
+
+Best checkpoint is saved whenever test accuracy improves. Final artifact is the **best epoch across the run**, not necessarily the last.
+
+---
+
+## 📦 Exported Artifacts
+
+Three files must move together into `ML_service/app/models/`:
+
+### `birds50_best.pth`
+PyTorch state dictionary. Contains all learned weights and biases.
+
 ```python
-# After training, plot loss and accuracy
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(12, 4))
-
-# Plot 1: Loss
-plt.subplot(1, 2, 1)
-plt.plot(train_losses)
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("Training Loss")
-plt.grid(True)
-
-# Plot 2: Accuracy
-plt.subplot(1, 2, 2)
-plt.plot(val_accuracies)
-plt.xlabel("Epoch")
-plt.ylabel("Accuracy (%)")
-plt.title("Validation Accuracy")
-plt.grid(True)
-
-plt.tight_layout()
-plt.show()
+# How it's loaded in production
+model.load_state_dict(
+    torch.load("birds50_best.pth", map_location="cpu")
+)
 ```
 
-### Confusion Matrix Analysis
-```python
-from sklearn.metrics import confusion_matrix, classification_report
+### `class_names.json`
+The **most operationally critical artifact.** Maps model output index to species string.
 
-# Get all predictions
-all_preds = []
-all_labels = []
-
-model.eval()
-with torch.no_grad():
-    for images, labels in test_loader:
-        images = images.to(device)
-        outputs = model(images)
-        _, predicted = torch.max(outputs, 1)
-        all_preds.extend(predicted.cpu().numpy())
-        all_labels.extend(labels.numpy())
-
-# Generate report
-print(classification_report(all_labels, all_preds, 
-                          target_names=train_dataset.classes))
+```json
+["American_Crow", "Anna_Hummingbird", "Baird_Sparrow", ...]
 ```
 
-## 🎓 Key Learnings & Insights
+Index 0 → "American_Crow", Index 1 → "Anna_Hummingbird", etc.
 
-### 1. Transfer Learning Effectiveness
-- **Insight**: MobileNetV2 features are already excellent for birds
-- **Evidence**: 91% accuracy with only 10 epochs of training
-- **Learning**: Pretrained weights are powerful; fine-tune gently
+> 🚨 This ordering **must match the training dataset class ordering exactly**. It is the cross-system contract between ML and the database.
 
-### 2. Data Augmentation Impact
-- **Insight**: Augmentation reduced overfitting from 15% to 5%
-- **Why**: More diverse training examples improve generalization
-- **Practical**: AutoAugment outperformed manual augmentation
+### `selected_classes.json`
+Records which 50 classes were randomly sampled. Enables:
+- Retraining with the same class set
+- Auditing what the model was trained on
+- Engineering communication about coverage
 
-### 3. Optimal Batch Size
-- **Insight**: Batch size 32 gave best convergence speed
-- **Why**: Balance between gradient noise and stability
-- **Too small (8)**: Noisy gradients, unstable training
-- **Too large (128)**: Smooth but poor generalization
+### `model_config.json`
+Human/machine-readable deployment metadata:
 
-### 4. Learning Rate Scheduling
-- **Insight**: Cosine annealing beat fixed learning rate by 2%
-- **Why**: Smooth decay allows better exploration
-- **Evidence**: Loss curve smoother, no oscillation
-
-### 5. Fine-tuning vs Full Training
-- **Insight**: Fine-tuning (frozen backbone) > Training from scratch
-- **Accuracy Difference**: 91% vs 78% on same data
-- **Reason**: ImageNet features transfer exceptionally well to birds
-
-### 6. Class Imbalance
-- **Challenge**: Some species have 3x more training examples
-- **Solution**: Kept imbalance (reflects real-world bird populations)
-- **Impact**: Common birds identified more reliably (expected behavior)
-
-## 🔍 Troubleshooting
-
-### Issue: Out of Memory Error
-```
-Symptom: Memory allocation failure
-Causes:
-  1. Batch size too large
-  2. High-resolution images
-  3. Insufficient system memory
-  
-Solutions:
-  - Reduce batch_size (32 → 16)
-  - Resize images smaller (224 → 128)
-  - Close other applications
-```
-
-### Issue: Model Not Converging
-```
-Symptom: Loss stays high, accuracy stuck at ~2%
-Causes:
-  1. Learning rate too high (destroying weights)
-  2. Gradient explosion
-  3. Data loader issues
-  
-Solutions:
-  - Reduce learning rate (3e-4 → 1e-4)
-  - Check data loading (print batch)
-  - Verify model is on GPU
-```
-
-### Issue: Low Accuracy
-```
-Symptom: Final accuracy <85%
-Causes:
-  1. Too few epochs
-  2. Strong data imbalance
-  3. Image quality issues
-  
-Solutions:
-  - Increase epochs (10 → 15)
-  - Implement class weighting
-  - Verify dataset images are valid
-```
-
-### Issue: Dataset Download Fails
-```
-Solution:
-  - Ensure proper authentication is configured
-  - Verify internet connection
-  - Check dataset availability
-  - Refer to kagglehub documentation
-```
-
-## 🔮 Advanced Topics
-
-### 1. Mixed Precision Training
-```python
-# Faster training, lower memory usage
-from torch.cuda.amp import autocast, GradScaler
-
-scaler = GradScaler()
-
-for images, labels in train_loader:
-    optimizer.zero_grad()
-    
-    with autocast():
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-    
-    scaler.scale(loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
-```
-
-### 2. Ensemble Methods
-```python
-# Train multiple models with different seeds
-models = []
-for seed in [42, 43, 44]:
-    torch.manual_seed(seed)
-    model = train_model(...)
-    models.append(model)
-
-# Average predictions
-def ensemble_predict(images):
-    preds = []
-    for model in models:
-        pred = model(images)
-        preds.append(pred)
-    return torch.stack(preds).mean(0)
-```
-
-### 3. Knowledge Distillation
-```python
-# Compress model into smaller student network
-from torch.nn import KLDivLoss
-
-# Teacher: Original MobileNetV2
-# Student: Smaller SqueezeNet
-
-for images, labels in train_loader:
-    teacher_out = teacher(images)
-    student_out = student(images)
-    
-    # Distillation loss: make student match teacher
-    loss = KLDivLoss()(student_out, teacher_out)
-    loss.backward()
-```
-
-## 📚 Additional Resources
-
-- **Transfer Learning**: https://cs231n.github.io/transfer-learning/
-- **Data Augmentation**: https://arxiv.org/abs/2003.08934 (AutoAugment)
-- **MobileNetV2 Paper**: https://arxiv.org/abs/1801.04381
-- **Cosine Annealing**: https://arxiv.org/abs/1608.03983
-
-## 🤝 Contributing
-
-Improvements to this notebook:
-
-1. **Better augmentation strategies**
-2. **Different architectures** (EfficientNet, ResNet)
-3. **Expanded dataset** (all 220 classes)
-4. **Optimization techniques** (quantization, pruning)
-5. **Analysis notebooks** (confusion matrix, misclassification analysis)
-
-## 📝 Citation
-
-If you use this training pipeline, please cite:
-
-```
-@misc{birdlens_training,
-  title={BirdLens Training Notebook},
-  author={BirdLens Contributors},
-  year={2024},
-  url={https://github.com/birdlens/training}
+```json
+{
+  "architecture": "MobileNetV2",
+  "input_size": [224, 224],
+  "num_classes": 50,
+  "best_accuracy": 91.02,
+  "framework": "PyTorch"
 }
 ```
 
 ---
 
-**Last Updated**: 2024  
-**Model Accuracy**: 91.02%  
-**Training Time**: ~15-20 minutes (GPU)
+## 🔬 Reproducibility & Data Integrity
+
+### What IS Reproducible
+
+```
+✅  Python class selection: random.seed(42) before random.sample()
+✅  Source class folders sorted before sampling
+✅  Selected classes and class-index order exported to JSON
+✅  Hyperparameters and transforms documented in notebook
+✅  Dataset accessible via KaggleHub with fixed dataset ID
+```
+
+### What SHOULD Be Improved
+
+```
+❌  PyTorch CPU/CUDA RNGs are not seeded (torch.manual_seed, cuda.manual_seed_all)
+❌  Deterministic mode not configured (torch.backends.cudnn.deterministic)
+❌  Dataset version/checksum not recorded
+❌  Python and library versions not pinned in a lockfile
+❌  Optimizer/scheduler state not saved in checkpoint
+❌  No experiment tracker (MLflow, W&B, etc.)
+❌  No code commit hash recorded with artifacts
+❌  No artifact checksums recorded
+```
+
+### Leakage & Evaluation Caution
+
+```
+Current workflow:
+┌─────────────────────────────────────────────────────┐
+│  train set  │  test set (used as validation)         │
+└─────────────────────────────────────────────────────┘
+
+The test set is used for epoch selection (checkpoint saving).
+This means the test set functions as a VALIDATION set.
+
+Correct workflow:
+┌──────────────────────────────────────────────────────────────┐
+│  train set  │  validation set  │  test set (touch once only) │
+└──────────────────────────────────────────────────────────────┘
+                      ↑                      ↑
+               select model here      report final metric here
+```
+
+> The reported 91.02% accuracy is on the source test split that guided checkpoint selection — it is an **optimistic estimate** of true generalization. A held-out test set would give a more honest number.
+
+---
+
+## 📊 Evaluation & Model Governance
+
+Accuracy alone is not sufficient for a bird-identification product. Every production release should include:
+
+### Recommended Metrics
+
+| Metric | Why It Matters |
+|--------|---------------|
+| **Top-1 accuracy** | Primary success metric |
+| **Top-5 accuracy** | Useful for visually similar species |
+| **Per-class precision / recall / F1** | Reveals weak species hidden by aggregate accuracy |
+| **Confusion matrix** | Identifies systematic confusion pairs (e.g., sparrow species) |
+| **Expected Calibration Error (ECE)** | Determines if confidence scores are trustworthy |
+| **Low-confidence coverage** | How often can the product safely answer? |
+| **Inference latency** | P50, P95, P99 on target hardware |
+| **Memory footprint** | Critical for mobile/edge deployment |
+
+### Model Release Checklist
+
+```
+□ Unique model version identifier
+□ Immutable artifact checksums (SHA-256)
+□ Dataset version and provenance
+□ Training code commit hash
+□ Full evaluation report (all metrics above)
+□ Known limitations documented
+□ Rollback path confirmed
+□ Compatibility check: class names vs backend birds catalog
+□ Smoke test suite passing
+□ Latency benchmarks on target hardware
+```
+
+### Robustness Test Scenarios
+
+Real-world bird photographs differ significantly from dataset images:
+
+| Scenario | Why Hard |
+|----------|---------|
+| Backlit birds | Silhouette only, no color |
+| Partial occlusion | Bird behind branches |
+| Motion blur | Bird in flight |
+| Distant birds | Small, noisy pixels |
+| Unusual poses | Upside-down, wings spread |
+| Non-bird images | Model always predicts something |
+| Similar-looking species | Sparrow/sparrow confusion |
+| Different lighting | Harsh sun vs. shade |
+
+---
+
+## 🖥️ Running the Notebook
+
+### Google Colab (Recommended)
+
+```
+Step 1  →  Open training.ipynb in Colab
+Step 2  →  Runtime → Change runtime type → GPU (T4 recommended, free tier)
+Step 3  →  Connect KaggleHub credentials if prompted
+Step 4  →  Run all cells (Runtime → Run All)
+Step 5  →  Review selected classes output
+Step 6  →  Review sample image visualization
+Step 7  →  Wait for training to complete (~10-30 min on T4)
+Step 8  →  Download artifacts via Colab's file panel or auto-download cells
+Step 9  →  Verify all three files: birds50_best.pth, class_names.json, selected_classes.json
+```
+
+### Local Execution
+
+```bash
+# Prerequisites: Python 3.9+, pip
+cd notebooks
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Adapt Colab-specific paths in the notebook first:
+# - /content/Birds50 → ./Birds50 (or your preferred local path)
+# - google.colab.files.download() → shutil.copy() or similar
+
+jupyter notebook training.ipynb
+```
+
+### Adapting for Local Paths
+
+Find and replace these Colab-specific patterns:
+
+| Colab Pattern | Local Replacement |
+|--------------|------------------|
+| `/content/Birds50/` | `./Birds50/` |
+| `from google.colab import files` | Remove or replace |
+| `files.download("artifact.pth")` | `shutil.copy("artifact.pth", output_dir)` |
+| `drive.mount('/content/drive')` | Remove if not needed |
+
+---
+
+## 🔭 Known Limitations & Next Experiments
+
+### Current Limitations
+
+| Limitation | Impact | Priority |
+|-----------|--------|---------|
+| Only 50/220 classes modeled | Product coverage | Medium |
+| Random (not curated) class selection | May include hard lookalike groups | Medium |
+| Test set used for checkpoint selection | Optimistic accuracy estimate | High |
+| Only top-1 accuracy tracked | No visibility into per-class weakness | High |
+| No confidence calibration | Overconfident predictions possible | Medium |
+| Direct square resize (no aspect-ratio preservation) | Distorts tall/wide birds | Low |
+| No explicit backbone freezing (despite transfer-learning docs) | Ambiguous training strategy | Medium |
+| No automated test suite | Regressions caught manually | High |
+
+### High-Value Next Experiments
+
+```
+Experiment 1  ─  Proper train/val/test splits
+                 Train on train, tune on val, report once on test
+                 Expected: more honest accuracy metric
+
+Experiment 2  ─  Compare training strategies
+                 (a) Frozen backbone, train head only  ~5 epochs
+                 (b) Frozen backbone first, unfreeze after 3 epochs
+                 (c) Full fine-tune (current)
+                 Expected: staged unfreezing often wins
+
+Experiment 3  ─  Top-K evaluation + temperature scaling
+                 Return top-3 predictions with calibrated confidence
+                 Expected: better UX for ambiguous images
+
+Experiment 4  ─  Unknown / out-of-distribution detection
+                 Add a "not a supported bird" test set
+                 Evaluate confidence threshold effectiveness
+
+Experiment 5  ─  Aspect-preserving preprocessing
+                 Resize shortest edge → CenterCrop(224)
+                 Match both training and inference
+                 Expected: better results for elongated birds
+
+Experiment 6  ─  Architecture comparison
+                 EfficientNet-B0/B4, ConvNeXt-Tiny, RegNet
+                 Benchmark: accuracy vs. latency vs. memory
+                 Target: beat MobileNetV2 at same inference budget
+
+Experiment 7  ─  Class-balanced training
+                 Weighted sampling or weighted loss for imbalanced classes
+                 Expected: better per-class recall for rare classes
+
+Experiment 8  ─  Mixed precision training
+                 torch.cuda.amp.autocast()
+                 Expected: 1.5-2x faster training on GPU, same accuracy
+
+Experiment 9  ─  ONNX / TorchScript export
+                 Export and benchmark quantized (INT8) model
+                 Expected: 2-4x inference speedup, smaller artifact
+
+Experiment 10 ─  Curated class expansion
+                 Add classes by geographic prevalence, user demand
+                 Expected: better product utility
+```
+
+---
+
+## 🛠️ Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| `Dataset download fails` | KaggleHub auth or network | Verify Kaggle credentials, check dataset availability |
+| `Out of memory (OOM) error` | Batch size or image size too large | Reduce batch size (32→16→8) or lower num_workers |
+| `Accuracy stays near random (~2%)` | Wrong labels, bad preprocessing | Verify class mapping, normalization, correct dataset split |
+| `Inference classes are wrong` | class_names.json from different run | Confirm JSON came from the exact same training run |
+| `FastAPI can't load weights` | Architecture mismatch | Confirm output size is 50 and matches the .pth checkpoint |
+| `Backend metadata enrichment fails` | Class name mismatch | Add/fix exact class string in PostgreSQL birds.name |
+| `Colab disconnects during training` | Runtime timeout | Enable "stay connected" or use Colab Pro; save checkpoints more often |
+| `Random selection changes` | Seed not set | Ensure `random.seed(42)` runs before `random.sample()` |
+
+---
+
+## 📈 Model Lifecycle
+
+The training notebook is the **beginning of the model lifecycle**, not the end:
+
+```
+training.ipynb
+      │
+      │  Produces artifacts
+      ▼
+ML_service/app/models/      ← Inference deployment
+      │
+      │  Served via FastAPI
+      ▼
+Express API                 ← Metadata enrichment
+      │
+      │  Consumed by
+      ▼
+Flutter App                 ← User-facing predictions
+      │
+      │  Generates
+      ▼
+Real-world prediction logs  ← Drift monitoring
+      │
+      │  Informs
+      ▼
+Next training run           ← Improved model
+```
+
+Its most important responsibility is producing a **traceable, compatible artifact set** that behaves predictably at every stage downstream.
+
+---
+
+<div align="center">
+
+**The notebook trains the model. The architecture around it makes the model useful.**
+
+*BirdLens Training — Part of the BirdLens full-stack AI bird identification system*
+
+</div>

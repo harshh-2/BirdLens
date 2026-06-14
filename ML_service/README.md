@@ -1,415 +1,567 @@
-# BirdLens ML Service
+# 🦅 BirdLens — ML Inference Service
 
-A FastAPI-based machine learning service for bird species classification using MobileNetV2. This service achieves **91.02% accuracy** on 50 bird species and is optimized for production deployment with minimal latency and memory footprint.
+> **FastAPI microservice that validates, preprocesses, and classifies bird images using a fine-tuned MobileNetV2 model. Returns species name and calibrated confidence in under a second.**
 
-## 📊 Overview
+---
 
-This ML service provides a REST API for bird species classification from images. It leverages transfer learning with MobileNetV2 to deliver fast, accurate predictions suitable for mobile and web applications.
+## 📑 Table of Contents
 
-### Key Metrics
-- **Accuracy**: 91.02%
-- **Model**: MobileNetV2 (pretrained, fine-tuned)
-- **Classes**: 50 bird species
-- **Input Size**: 224×224 pixels
-- **Confidence Threshold**: 0.65
-- **Max File Size**: 3MB
+- [Overview](#-overview)
+- [Quick Start](#-quick-start)
+- [Service Contract](#-service-contract)
+- [Architecture](#️-architecture)
+- [Request Lifecycle](#-request-lifecycle)
+- [Model Details](#-model-details)
+- [Preprocessing Pipeline](#️-preprocessing-pipeline)
+- [Validation & Error Handling](#-validation--error-handling)
+- [Project Structure](#-project-structure)
+- [Artifact Contract](#-artifact-contract)
+- [Deployment & Operations](#-deployment--operations)
+- [Why a Dedicated Microservice?](#-why-a-dedicated-microservice)
+- [Known Limitations & Roadmap](#-known-limitations--roadmap)
+- [Troubleshooting](#-troubleshooting)
 
-## 📦 Dataset
+---
 
-### Source
-- **Dataset**: Kaggle Bird Species Classification (220 categories)
-- **Link**: `kedarsai/bird-species-classification-220-categories`
-- **Classes Selected**: 50 species (randomly sampled for optimal diversity)
+## 🔍 Overview
 
-### Dataset Split
-- **Training Images**: ~500+ per class (varies)
-- **Test Images**: ~100+ per class (varies)
-- **Total Classes**: 50 bird species
+The BirdLens ML Service is a focused, single-responsibility FastAPI application. It does **one thing well**: accept a bird photograph, run it through a 50-class PyTorch classifier, and return a structured prediction.
 
-### Classes
-Selected 50 bird species from 220 available categories to balance:
-- Training time and computational resources
-- Model generalization
-- Real-world deployment practicality
+It is **deliberately decoupled** from the Node.js API — inference stays in Python's native ML ecosystem, and each service can scale and deploy independently.
 
-Full list of selected species: See `app/models/selected_classes.json`
-
-## 🤖 Model Architecture
-
-### Architecture Details
 ```
-MobileNetV2 (Transfer Learning)
-├── Pretrained ImageNet Weights
-├── Input Layer: 3 × 224 × 224
-├── Feature Extraction: MobileNet_V2 backbone
-├── Classification Head: 
-│   ├── Average Pooling
-│   ├── Dropout
-│   └── Linear Layer (1280 → 50 classes)
-└── Output: Softmax probabilities
+┌──────────────────────────────────────────────────────────────┐
+│                        ML SERVICE SCOPE                      │
+│                                                              │
+│   ✅  Image validation (MIME, size, decodability)            │
+│   ✅  Pillow-based preprocessing                             │
+│   ✅  MobileNetV2 inference                                  │
+│   ✅  Structured JSON prediction response                    │
+│                                                              │
+│   ❌  User identity / authentication                         │
+│   ❌  History or favorites persistence                       │
+│   ❌  S3 / database access                                   │
+│   ❌  Business logic or metadata enrichment                  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### Why MobileNetV2?
-1. **Lightweight**: ~3.5M parameters (only final layer trainable: ~65K)
-2. **Fast Inference**: <100ms per prediction on CPU
-3. **Memory Efficient**: Suitable for edge devices and serverless deployments
-4. **Transfer Learning Advantage**: Leverages ImageNet-pretrained weights
+---
 
-### Architecture Comparison: MobileNetV2 vs EfficientNet
+## ⚡ Quick Start
 
-| Aspect | MobileNetV2 | EfficientNet |
-|--------|------------|-------------|
-| Parameters | 3.5M | 5.3M |
-| Inference Time (CPU) | ~80-100ms | ~150-200ms |
-| Memory (RAM) | ~13MB | ~20MB |
-| Accuracy Potential | High (91%+) | Very High (93%+) |
-| Deployment Ease | Excellent | Good |
-| Training Time | Faster | Slower |
-
-**Choice Rationale**: MobileNetV2 was selected for:
-- **Deployment Speed**: Critical for real-time mobile applications
-- **Resource Constraints**: Serverless functions and edge devices
-- **Accuracy Tradeoff**: 91% accuracy is sufficient for production bird identification
-- **Inference Latency**: <100ms ensures responsive user experience
-
-**Learnings**: While EfficientNet offers 1-2% higher accuracy, the deployment overhead and inference latency made MobileNetV2 the practical choice. The 91% accuracy represents an excellent balance between accuracy and speed.
-
-## 🔄 Training Pipeline
-
-### Hyperparameters
-```python
-Epochs: 10
-Batch Size: 32
-Learning Rate: 3e-4
-Optimizer: AdamW
-Weight Decay: 1e-2
-Scheduler: CosineAnnealingLR
-Loss Function: CrossEntropyLoss
-Device: CUDA (GPU) or CPU fallback
-```
-
-### Training Process
-1. **Data Loading**: ImageFolder datasets with parallel loading (2 workers)
-2. **Augmentation**: Applied to training set only
-3. **Forward Pass**: Images → Model → Logits
-4. **Loss Calculation**: CrossEntropyLoss for 50-class classification
-5. **Backward Pass**: Gradient computation via autograd
-6. **Optimizer Step**: AdamW with weight decay for regularization
-7. **Learning Rate Schedule**: CosineAnnealingLR for smooth decay
-8. **Validation**: Model evaluation after each epoch
-9. **Checkpointing**: Save best model based on validation accuracy
-
-### Model Training Details
-- **Trainable Parameters**: ~65K (final layer only)
-- **Total Parameters**: 3.5M (frozen backbone)
-- **Training Strategy**: Fine-tuning (weights frozen except classification head)
-- **Training Duration**: ~10-15 minutes per epoch (GPU), ~1-2 minutes (high-performance GPU)
-
-## 🎨 Data Augmentations
-
-### Training Augmentations
-Applied to increase model robustness and prevent overfitting:
-
-```python
-1. Resize: 224×224 (standardized input)
-2. RandomHorizontalFlip: 50% probability
-   └─ Handles birds facing left/right
-3. RandomRotation: ±15 degrees
-   └─ Captures birds at various angles
-4. AutoAugment (ImageNet Policy)
-   └─ Automatic augmentation selection
-   └─ Includes: color jittering, shearing, posterization
-5. Normalization: ImageNet statistics
-   └─ mean=[0.485, 0.456, 0.406]
-   └─ std=[0.229, 0.224, 0.225]
-```
-
-### Test/Inference Augmentations
-Minimal processing to preserve original image information:
-
-```python
-1. Resize: 224×224
-2. Normalization: ImageNet statistics
-└─ No color/geometric augmentations
-```
-
-### Augmentation Strategy
-- **Purpose**: Combat overfitting on limited dataset
-- **Impact**: Improves generalization by ~2-3%
-- **Why AutoAugment**: Automatically searches optimal augmentation policies
-
-## ⚙️ Optimizer & Scheduler
-
-### Optimizer: AdamW
-```python
-AdamW(
-    lr=3e-4,          # Conservative learning rate prevents weight destruction
-    weight_decay=1e-2 # L2 regularization prevents overfitting
-)
-```
-
-**Why AdamW over Adam?**
-- **Decoupled Weight Decay**: Properly implements L2 regularization
-- **Better Generalization**: Especially with fine-tuning
-- **Adaptive Learning Rate**: Per-parameter learning rate adaptation
-
-### Learning Rate Scheduler: CosineAnnealingLR
-```python
-CosineAnnealingLR(
-    T_max=10  # Number of epochs
-)
-```
-
-**Learning Rate Schedule**:
-- Starts at 3e-4
-- Smoothly decays following cosine curve
-- Reaches near-zero by final epoch
-- Prevents oscillation and improves convergence
-
-**Why Cosine Annealing?**
-- Smooth decay prevents sudden performance drops
-- Forces exploration early, exploitation late
-- Works well with fine-tuning schedules
-
-## 📈 Results & Accuracy
-
-### Final Performance
-- **Validation Accuracy**: 91.02%
-- **Best Epoch**: Typically epoch 8-10
-- **Convergence**: Achieved by epoch 8
-
-### Accuracy Breakdown
-| Metric | Value |
-|--------|-------|
-| Overall Accuracy | 91.02% |
-| Confidence Threshold | 0.65 |
-| High-Confidence Predictions | ~85-90% |
-| False Positive Rate | ~8-9% |
-| False Negative Rate | ~8-9% |
-
-### Challenges & Solutions
-
-#### 1. **Class Imbalance**
-- **Challenge**: Different bird species have varying dataset sizes
-- **Solution**: Balanced sampling, weighted loss considerations
-- **Impact**: Improved minority class accuracy
-
-#### 2. **Background Complexity**
-- **Challenge**: Birds photographed in varied backgrounds (forests, urban, water)
-- **Solution**: AutoAugment helps learn background-invariant features
-- **Learning**: More augmentation needed for extreme backgrounds
-
-#### 3. **Pose Variation**
-- **Challenge**: Birds at different angles, perched/flying
-- **Solution**: RandomRotation (±15°) and flips in augmentation
-- **Impact**: Robust to pose changes within reasonable bounds
-
-#### 4. **Overfitting Prevention**
-- **Challenge**: Limited dataset (50 classes) vs model capacity
-- **Solution**: 
-  - Transfer learning (frozen backbone)
-  - Data augmentation
-  - Weight decay (L2 regularization)
-- **Result**: Generalization gap minimized to <5%
-
-#### 5. **Confidence Calibration**
-- **Challenge**: Model overconfidence on uncertain samples
-- **Solution**: Set confidence threshold at 0.65 for production
-- **Impact**: Flags uncertain predictions for human review
-
-### Performance Insights
-- **Best performing classes**: Common species with clear visual features (robins, cardinals)
-- **Challenging classes**: Similar-looking species (warblers, sparrows)
-- **Seasonal variation**: Some species harder to identify during molting
-
-## 🚀 How to Run
-
-### Prerequisites
 ```bash
-Python 3.8+
-pip/conda package manager
-GPU (optional, for faster training)
-```
+# 1. Clone and navigate
+cd ML_service
 
-### Installation
+# 2. Create virtual environment
+python -m venv .venv
 
-1. **Clone the repository**
-```bash
-cd BirdLens/ML_service
-```
+# 3. Activate (Linux/macOS)
+source .venv/bin/activate
+# Windows: .venv\Scripts\activate
 
-2. **Create virtual environment**
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. **Install dependencies**
-```bash
+# 4. Install dependencies
 pip install -r requirements.txt
+
+# 5. Start the service
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Running the API Server
+> ⚠️ **Important:** Always run from the `ML_service/` directory — model artifact paths are relative to it.
 
-1. **Start FastAPI server**
+**Verify it's running:**
+
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port <PORT>
+curl http://localhost:8000/health
+# → {"status": "ok"}
 ```
-Replace `<PORT>` with your desired port number.
 
-2. **Test health endpoint**
+**Run a prediction:**
+
 ```bash
-curl http://localhost:<PORT>/health
+curl -X POST http://localhost:8000/api/predict/ \
+     -F "file=@/path/to/bird.jpg"
 ```
 
-3. **Access API documentation**
-API documentation is automatically generated by FastAPI at the `/docs` and `/redoc` endpoints.
+Interactive API docs available at:
+- **Swagger UI:** `http://localhost:8000/docs`
+- **ReDoc:** `http://localhost:8000/redoc`
 
-### Making Predictions
+---
 
-The API accepts image files via HTTP POST requests. Refer to the API documentation (generated at `/docs`) for detailed endpoint information and interactive testing.
+## 📡 Service Contract
 
-**General Pattern:**
+### Endpoints
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `GET` | `/` | None | Basic service liveness |
+| `GET` | `/health` | None | Process health check |
+| `POST` | `/api/predict/` | None (internal) | Single-image bird classification |
+
+---
+
+### `POST /api/predict/`
+
+**Request** — `multipart/form-data` with field `file`:
+
+```bash
+curl -X POST http://localhost:8000/api/predict/ \
+     -F "file=@sparrow.jpg"
 ```
-POST /predict
-Content-Type: multipart/form-data
 
-Request: Image file (JPG, PNG, WEBP)
-Response: JSON with bird species, confidence, and certainty flag
-```
+**Success Response** — `200 OK`:
 
-See the deployed API documentation for specific endpoint URLs and code examples.
-
-### Response Format
 ```json
 {
-  "bird": "Northern Cardinal",
-  "confidence": 94.23,
+  "bird": "Baird_Sparrow",
+  "confidence": 99.25,
   "is_confident": true
 }
 ```
 
-- **bird**: Predicted bird species name
-- **confidence**: Prediction confidence (0-100%)
-- **is_confident**: Boolean flag (True if confidence ≥ 0.65)
+**Field Semantics:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `bird` | `string` | Exact class string from `class_names.json` — must match `birds.name` in PostgreSQL exactly |
+| `confidence` | `float` | `max(softmax) × 100`, rounded to 2 decimal places |
+| `is_confident` | `bool` | `true` when raw probability ≥ `0.65` |
+
+> 🔗 The `bird` field is the cross-service contract key. If it doesn't exactly match `birds.name` in the backend DB, metadata enrichment silently fails.
+
+---
+
+## 🏗️ Architecture
+
+### Service Position in BirdLens
+
+```
+Flutter App
+    │
+    │  HTTPS + JWT
+    ▼
+Node.js / Express API  ────────────────────────────┐
+    │                                               │
+    │  multipart/form-data (image buffer)           │  Drizzle ORM
+    ▼                                               ▼
+FastAPI ML Service                          Neon PostgreSQL
+    │
+    ▼
+PyTorch MobileNetV2
+    │
+    └──► { bird, confidence, is_confident }
+         returned to Express → enriched → Flutter
+```
+
+### Internal Component Flow
+
+```
+POST /api/predict/
+       │
+       ▼
+┌─────────────────┐
+│  Route Layer    │  routes/prediction.py
+│  (Transport)    │  receives UploadFile, delegates
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Service Layer  │  services/prediction.py
+│  (Use Case)     │  validates MIME, size, decodability
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Image Util     │  utils/image_processor.py
+│  (Transform)    │  resize → tensor → normalize → batch
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Classifier     │  models/bird_classifier.py
+│  (Inference)    │  BirdClassifier.predict()
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Schema Layer   │  schemas/prediction_schema.py
+│  (Validation)   │  Pydantic validates response shape
+└────────┬────────┘
+         │
+         ▼
+    JSON Response
+```
+
+---
+
+## 🔄 Request Lifecycle
+
+A single prediction request traverses 7 stages:
+
+```
+Stage 1  ──  HTTP Transport
+             routes/prediction.py receives UploadFile
+
+Stage 2  ──  MIME Validation
+             services/prediction.py checks content_type
+             ✅ image/jpeg  ✅ image/png  ✅ image/webp
+             ❌ anything else → HTTP 400
+
+Stage 3  ──  Size Check
+             Read bytes into memory
+             ❌ > 3 MB → HTTP 413
+
+Stage 4  ──  Image Decodability
+             Pillow.Image.open() verifies the bytes
+             .convert("RGB") normalizes channel count
+             ❌ Invalid/corrupt image → HTTP 400
+
+Stage 5  ──  Preprocessing
+             utils/image_processor.py
+             Resize(224×224) → ToTensor() → Normalize(ImageNet)
+             Add batch dimension → shape [1, 3, 224, 224]
+
+Stage 6  ──  Inference
+             BirdClassifier.predict()
+             torch.no_grad() → logits → softmax
+             argmax → class index → class name lookup
+
+Stage 7  ──  Response
+             Pydantic validates PredictionResponse
+             Returns { bird, confidence, is_confident }
+```
+
+> 🧠 User images are **processed in memory only** — never written to disk, database, or object storage.
+
+---
+
+## 🤖 Model Details
+
+| Attribute | Value |
+|-----------|-------|
+| Architecture | MobileNetV2 |
+| Framework | PyTorch + torchvision |
+| Pretrained weights | ImageNet (default) |
+| Classifier head | `Linear(1280, 50)` |
+| Input shape | `[1, 3, 224, 224]` |
+| Classes | 50 bird species |
+| Best reported accuracy | **91.02%** |
+| Confidence threshold | `0.65` (raw softmax probability) |
+| Runtime device | CPU |
+| Gradient computation | Disabled (`torch.no_grad()`) |
+
+### Startup Initialization Sequence
+
+The `BirdClassifier` singleton initializes **once at application import** — not per request:
+
+```
+Application Start
+       │
+       ├─ 1. Load class_names.json (index → species name map)
+       │
+       ├─ 2. Instantiate MobileNetV2 with ImageNet weights
+       │
+       ├─ 3. Replace classifier[1]: Linear(1280, 50)
+       │
+       ├─ 4. Load birds50_best.pth  (map_location="cpu")
+       │
+       ├─ 5. model.eval()  — switch to evaluation mode
+       │
+       └─ 6. torch.no_grad()  — disable gradient tracking
+```
+
+> ⚡ Loading at startup avoids cold-inference latency per request. The tradeoff: if any artifact is missing or shape-mismatched, **the service fails to start** — which is the right failure mode.
+
+---
+
+## 🖼️ Preprocessing Pipeline
+
+Inference preprocessing **must exactly match training** — any mismatch degrades accuracy:
+
+```
+Input Image (any size, any valid format)
+       │
+       ▼
+┌─────────────────────────────────┐
+│  Resize(224 × 224)              │  ← Direct square resize
+│  Note: aspect ratio not         │     preserved (future: center crop)
+│  preserved                      │
+└─────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────┐
+│  ToTensor()                     │  ← [H, W, C] uint8 → [C, H, W] float
+│  Scales pixel values to [0, 1]  │
+└─────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────┐
+│  Normalize(ImageNet stats)      │
+│  mean = [0.485, 0.456, 0.406]   │
+│  std  = [0.229, 0.224, 0.225]   │
+└─────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────┐
+│  unsqueeze(0)                   │  ← Add batch dimension
+│  Shape: [3, 224, 224]           │
+│       → [1, 3, 224, 224]        │
+└─────────────────────────────────┘
+       │
+       ▼
+  MobileNetV2 Inference
+```
+
+> ℹ️ The current direct-resize approach is simple and model-compatible, but can distort unusually shaped images. A future improvement would use `Resize + CenterCrop` consistently in both training and inference.
+
+---
+
+## ❗ Validation & Error Handling
+
+| Condition | HTTP Status | Response |
+|-----------|-------------|----------|
+| Unsupported MIME type | `400` | Only JPG/PNG/WebP allowed |
+| Payload over 3 MB | `413` | Payload too large |
+| Invalid or corrupt image | `400` | Could not decode image |
+| Valid image, successful inference | `200` | Prediction JSON |
+
+**Validation is dual-layered:**
+1. Declared MIME type check (what the client claims)
+2. Actual Pillow decodability check (what the bytes actually are)
+
+> 🔒 For production: also place body-size limits at the **reverse proxy** and **Node API** so oversized uploads are rejected before crossing service boundaries.
+
+---
 
 ## 📁 Project Structure
 
 ```
 ML_service/
+│
 ├── app/
-│   ├── main.py              # FastAPI application
+│   ├── main.py                    # FastAPI app instance, health routes
+│   │
 │   ├── models/
-│   │   ├── bird_classifier.py      # Model loading & inference
-│   │   ├── birds50_best.pth        # Trained model weights
-│   │   ├── class_names.json        # Mapping of class indices to species names
-│   │   ├── selected_classes.json   # List of 50 selected bird species
-│   │   ├── model_config.json       # Model metadata
+│   │   ├── bird_classifier.py     # Singleton model loader + predict()
+│   │   ├── birds50_best.pth       # ← Trained state dictionary (not committed)
+│   │   ├── class_names.json       # Index → species string mapping
+│   │   ├── selected_classes.json  # Original 50 sampled classes
+│   │   └── model_config.json      # Architecture metadata + best accuracy
+│   │
 │   ├── routes/
-│   │   └── prediction.py    # API endpoints
-│   ├── services/
-│   │   └── prediction.py    # Prediction logic
+│   │   └── prediction.py          # /api/predict/ transport endpoint
+│   │
 │   ├── schemas/
-│   │   └── prediction_schema.py   # Pydantic response model
+│   │   └── prediction_schema.py   # Pydantic: PredictionResponse model
+│   │
+│   ├── services/
+│   │   └── prediction.py          # Validation + prediction use case
+│   │
 │   └── utils/
-│       └── image_processor.py     # Image preprocessing
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
+│       └── image_processor.py     # Deterministic inference preprocessing
+│
+├── requirements.txt               # Pinned Python dependencies
+└── README.md                      # This document
 ```
 
-## 📊 API Endpoints
+### File Responsibilities at a Glance
 
-The API provides endpoints for health checking and bird species prediction. Specific endpoint paths and detailed documentation are available through the FastAPI auto-generated documentation interface (`/docs`).
+| File | Who calls it | What it does |
+|------|-------------|--------------|
+| `main.py` | Uvicorn | Creates app, mounts routes, health endpoint |
+| `routes/prediction.py` | Express (internal) | HTTP transport, hands UploadFile to service |
+| `services/prediction.py` | Route | Validation logic + orchestrates preprocessing + inference |
+| `utils/image_processor.py` | Service | Deterministic tensor preprocessing |
+| `models/bird_classifier.py` | Service | Loads weights, runs torch inference |
+| `schemas/prediction_schema.py` | Route | Pydantic response contract enforcement |
 
-**Standard Response Format:**
-```json
-{
-  "bird": "Species Name",
-  "confidence": 0.0,
-  "is_confident": true
-}
+---
+
+## 📦 Artifact Contract
+
+The service requires **four coordinated artifacts** — all must be from the same training run:
+
+| Artifact | Role | If Missing/Wrong |
+|----------|------|-----------------|
+| `birds50_best.pth` | Trained model state dictionary | Service fails to start |
+| `class_names.json` | Output-index → species string map | Wrong/missing predictions |
+| `selected_classes.json` | Records sampled source classes | Loss of training provenance |
+| `model_config.json` | Architecture + accuracy metadata | Broken deployment validation |
+
+### Release Checklist
+
+Before deploying a new model version:
+
+```
+□ Train and select best checkpoint
+□ Export class_names.json in same index order used during training
+□ Verify: len(class_names.json) == final Linear layer output size (50)
+□ Verify: every class name exists exactly once in PostgreSQL birds.name
+□ Run known-image smoke suite (≥ 1 test image per class ideally)
+□ Measure accuracy and P95 inference latency
+□ Update model_config.json with verified metadata
+□ Deploy ML service BEFORE depending on new classes from backend/mobile
+□ Record model version (not yet in response — add to roadmap)
 ```
 
-**Error Handling:**
-- Invalid or unsupported image formats are rejected
-- Files exceeding size limits are rejected
-- Refer to API documentation for detailed error codes
+### Cross-System Class Name Invariant
 
-## ⚙️ Configuration
-
-### Image Processing
-- **Input Size**: 224×224 pixels
-- **Color Space**: RGB
-- **Normalization**: ImageNet statistics
-
-### Model Configuration
-- **Max File Size**: 3MB
-- **Allowed Formats**: JPG, PNG, WEBP
-- **Confidence Threshold**: 0.65 (adjustable)
-- **Batch Size**: 1 (single image inference)
-
-### Performance Optimization
-- **GPU Support**: Automatic CUDA detection
-- **CPU Fallback**: Graceful degradation
-- **Batch Processing**: Support for future upgrades
-
-## 🔍 Troubleshooting
-
-### Issue: "Module not found" error
-```bash
-Solution: pip install -r requirements.txt
+```
+class_names.json[index]
+        ==
+FastAPI response: "bird"
+        ==
+PostgreSQL birds.name
 ```
 
-### Issue: Memory constraints
-```bash
-Solution: System automatically adapts; CPU fallback available
+> 🚨 A single character difference (case, underscore, space) causes inference to succeed but metadata enrichment to silently fail — the most dangerous bug category in this system.
+
+---
+
+## 🚀 Deployment & Operations
+
+### Container / Runtime Expectations
+
+```
+• Run one or more Uvicorn workers (benchmark memory × worker count first)
+• Include all model artifacts in the immutable deployment image
+• Keep the service PRIVATE — only the Node.js backend should reach it
+• Use /health for process liveness
+• Add a READINESS check that confirms BirdClassifier loaded successfully
+• Set request-size and timeout limits at the edge (reverse proxy)
 ```
 
-### Issue: Low accuracy on specific image
-```bash
-Possible Causes:
-- Poor image quality
-- Unusual bird pose
-- Similar-looking species
-- Confidence below threshold (0.65)
+### Environment
 
-Solution: Ensure images are high quality, well-lit, clear bird face
+No environment variables are required for basic operation — the service is stateless and self-contained. For production, consider:
+
+- `ML_CONFIDENCE_THRESHOLD` — make the 0.65 threshold configurable
+- `ML_MAX_FILE_SIZE_MB` — configurable upload limit
+- `LOG_LEVEL` — structured log verbosity
+
+### Scaling Behavior
+
+```
+Current:  CPU-bound synchronous inference inside async FastAPI route
+          → Under concurrency, this blocks worker event loop progress
+
+Short-term fix:   run_in_executor() to offload to thread pool
+Medium-term:      Multiple Uvicorn worker processes
+Long-term:        TorchScript / ONNX export + dedicated inference server
+                  GPU serving for high-throughput deployments
+                  Request batching
 ```
 
-### Issue: Model file not found
-```bash
-Ensure birds50_best.pth is in app/models/
-Run training notebook to generate model weights
+### Observability to Add
+
+```
+Metric category          │ What to track
+─────────────────────────┼──────────────────────────────────────
+Request metrics          │ Count, status distribution, P50/P95/P99 latency
+Stage timing             │ Decode, preprocess, inference individually
+Prediction distribution  │ Per-class prediction counts
+Confidence distribution  │ Low-confidence rate, histogram
+Validation errors        │ Invalid type, oversized, corrupt image counts
+Artifact info            │ Model version, class_names.json checksum
+Resource utilization     │ CPU%, memory MB, worker count
+Drift signals            │ Confidence trend, class distribution shift
 ```
 
-## 🔮 Future Improvements
+---
 
-1. **Ensemble Models**: Combine MobileNetV2 with EfficientNet for 1-2% accuracy gain
-2. **Expanded Dataset**: Include all 220 bird species
-3. **Geographic Filtering**: Region-specific predictions
-4. **Fine-grained Classification**: Identify bird subspecies
-5. **Confidence Calibration**: Temperature scaling for better confidence estimates
-6. **Batch Predictions**: Optimize for multiple images
-7. **Model Quantization**: INT8 quantization for edge deployment
+## 🤔 Why a Dedicated Microservice?
 
-## 📝 License
+### Advantages
 
-This project is part of BirdLens - Open source bird identification system.
+```
+✅  PyTorch, torchvision, Pillow, NumPy stay isolated from Node.js dependencies
+✅  Inference resources scale independently from CRUD/auth traffic
+✅  Model deployment and version changes are independent from the public API
+✅  Mobile response contract stays stable even if model architecture changes
+✅  Python-native tooling simplifies experimentation (ONNX, quantization, etc.)
+✅  Clear blast radius — an ML service crash doesn't take down auth or favorites
+```
 
-## 🤝 Contributing
+### Tradeoffs
 
-To improve the model:
+```
+⚠️  Extra network hop adds latency (internal network should be fast)
+⚠️  Second failure domain — requires its own health checks and deployment
+⚠️  Service discovery, monitoring, and deployment complexity
+⚠️  Strict contract management needed (class names, response schema)
+⚠️  Requires explicit service-to-service authentication in production
+```
 
-1. Add more training data
-2. Experiment with different architectures (EfficientNet, ResNet)
-3. Improve augmentation strategies
-4. Fine-tune hyperparameters
-5. Test on real-world bird images
+> The Node backend should remain the **only client-facing entry point**. Exposing FastAPI directly bypasses JWT authentication, history recording, metadata enrichment, and rate-control policy.
 
-## 📚 References
+---
 
-- [MobileNetV2 Paper](https://arxiv.org/abs/1801.04381)
-- [Transfer Learning Best Practices](https://cs231n.github.io/transfer-learning/)
-- [PyTorch Documentation](https://pytorch.org/docs/stable/index.html)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Kaggle Bird Dataset](https://www.kaggle.com/datasets/kedarsai/bird-species-classification-220-categories)
+## 🗺️ Known Limitations & Roadmap
+
+### Current Limitations
+
+| Limitation | Impact |
+|-----------|--------|
+| Only 50 of 220 possible species | Can't identify unsupported birds |
+| No "unknown species" class | Unsupported birds get confidently misclassified |
+| Only top-1 prediction returned | No fallback for ambiguous images |
+| Softmax confidence is uncalibrated | Overconfident predictions possible |
+| Model always loads on CPU | Inference is slower than GPU-accelerated |
+| Artifact paths relative to CWD | Deployment-environment sensitive |
+| No automated tests | Regressions are caught manually |
+| No internal service authentication | FastAPI accessible to any internal caller |
+
+### Priority Improvements
+
+```
+Priority 1  ─  Unit tests for validation, preprocessing, and API contract
+Priority 2  ─  Return model version in response + top-K predictions
+Priority 3  ─  Confidence calibration (temperature scaling)
+Priority 4  ─  Unknown-species rejection strategy
+Priority 5  ─  Move paths/config to typed settings (Pydantic Settings)
+Priority 6  ─  Readiness check, structured logs, metrics, tracing
+Priority 7  ─  Benchmark ONNX/TorchScript/quantization for latency reduction
+Priority 8  ─  run_in_executor for non-blocking async inference
+```
+
+---
+
+## 🛠️ Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| `Model file not found` | Wrong working directory | Run from `ML_service/`; verify `app/models/birds50_best.pth` exists |
+| `State-dict shape mismatch` | Weight file from different run | Confirm class count (50) and `class_names.json` length both match |
+| `Backend says bird not found` | Class name mismatch | Ensure predicted class matches `birds.name` in PostgreSQL exactly |
+| `Every result has low confidence` | Preprocessing mismatch | Verify normalization stats match training; check input image quality |
+| `First request is slow` | Model warm-up / cold start | Expected — model is loaded at startup, not per-request |
+| `Memory / latency rises under load` | Single-worker CPU saturation | Benchmark worker count; consider run_in_executor or ONNX export |
+| `Service fails to start` | Missing or incompatible artifact | Check all four artifacts exist and match the same training run |
+
+---
+
+## 📋 Dependencies (requirements.txt)
+
+Key pinned dependencies:
+
+```
+fastapi         — ASGI web framework
+uvicorn         — ASGI server
+pydantic        — Response schema validation
+torch           — PyTorch inference runtime
+torchvision     — MobileNetV2, transforms
+Pillow          — Image decoding and RGB conversion
+python-multipart — multipart/form-data parsing
+```
+
+---
+
+<div align="center">
+
+**This service is deliberately small.**
+Its strength is a narrow, explicit contract around safe image validation and model inference.
+
+*BirdLens ML Service — Part of the BirdLens full-stack AI bird identification system*
+
+</div>
