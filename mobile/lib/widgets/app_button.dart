@@ -6,7 +6,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 Widget AppButton({
   required String buttonText,
-  required VoidCallback onTap,
+  required VoidCallback? onTap,
 }) {
   return GestureDetector(
     onTap: onTap,

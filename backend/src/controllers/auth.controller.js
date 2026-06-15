@@ -28,7 +28,7 @@ export const signup = async (req, res) => {
             return res.status(400).json({message: "Invalid email format"});
         }
         if(existingUser.length > 0){
-            return res.status(400).json({message:"Email already in use"});
+            return res.status(409).json({message:"Email already in use"});
         }
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
         const newUser = await db.insert(users).values({email, password_hash: hashedPassword, username}).returning();
