@@ -48,6 +48,10 @@
 		</dict>
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<key>NSCameraUsageDescription</key>
+	<string>BirdLens needs camera access to identify birds.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string> BirdLens needs gallery access to identify birds.</string>
 	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>

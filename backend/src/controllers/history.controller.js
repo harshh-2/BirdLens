@@ -13,6 +13,7 @@ export const getHistory = async (req, res) => {
     bird_id: birds.id,
     name: birds.name,
     aws_image_key: birds.aws_image_key,
+    habitat: birds.habitat ,
     confidence: history.confidence,
     predicted_at: history.predicted_at,
   }).from(history).innerJoin(

@@ -24,20 +24,16 @@ class _SplashScreenState
     await Future.delayed(
       const Duration(seconds: 2),
     );
-    final isLoggedIn =
-        await ref.read(authProvider.notifier).checkAuth();
+    await ref
+      .read(
+        authProvider.notifier,
+      )
+      .checkAuth();
     if (!mounted) return;
-    if (isLoggedIn) {
-      Navigator.pushReplacementNamed(
-        context,
-        "/home",
-      );
-    } else {
-      Navigator.pushReplacementNamed(
-        context,
-        "/",
-      );
-    }
+    Navigator.pushReplacementNamed(
+  context,
+  "/auth",
+);
   }
   @override
   Widget build(BuildContext context) {

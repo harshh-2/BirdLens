@@ -70,7 +70,7 @@ class _SignUpState extends ConsumerState<SignUp> {
                   );
           if (!mounted) return;
           if (success) {
-            Navigator.pushReplacementNamed(context,"/home",);
+            Navigator.pushReplacementNamed(context,"/main",);
           } else {
             final error =
                 ref.read(authProvider).error;

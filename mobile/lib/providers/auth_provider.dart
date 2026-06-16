@@ -129,38 +129,35 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<bool> checkAuth() async {
+  try {
+    final token =
+        await SecureStorageService
+            .getToken();
 
-    try {
-
-      final token =
-          await SecureStorageService
-              .getToken();
-
-      if (token == null) {
-        return false;
-      }
-
-      final userData =
-          await _authService
-              .getCurrentUser();
-
-      state = state.copyWith(
-        user: User.fromJson(
-          userData,
-        ),
-      );
-
-      return true;
-
-    } catch (_) {
-
-      await SecureStorageService
-          .deleteToken();
-
+    if (token == null) {
+      state = const AuthState();
       return false;
     }
-  }
 
+    final userData =
+        await _authService
+            .getCurrentUser();
+
+    state = state.copyWith(
+      user: User.fromJson(userData),
+    );
+
+    return true;
+
+  } catch (_) {
+    await SecureStorageService
+        .deleteToken();
+
+    state = const AuthState();
+
+    return false;
+  }
+}
   Future<void> logout() async {
 
     await SecureStorageService

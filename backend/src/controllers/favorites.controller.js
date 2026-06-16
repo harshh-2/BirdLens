@@ -30,7 +30,7 @@ export const getFavorites = async (req, res) => {
         if (!user_id) {
             return res.status(400).json({ message: "User ID is required" });
         }
-        const favoriteBirdsRaw = await db.select({bird_id: birds.id,name: birds.name,aws_image_key: birds.aws_image_key,created_at: favorites.created_at,}).from(favorites).innerJoin(birds,eq(favorites.bird_id, birds.id)).where(eq(favorites.user_id, user_id));
+        const favoriteBirdsRaw = await db.select({bird_id: birds.id,name: birds.name,aws_image_key: birds.aws_image_key,habitat:birds.habitat,created_at: favorites.created_at,}).from(favorites).innerJoin(birds,eq(favorites.bird_id, birds.id)).where(eq(favorites.user_id, user_id));
         if (favoriteBirdsRaw.length === 0) {
         return res.status(200).json([]);
         }
