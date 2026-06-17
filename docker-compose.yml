@@ -1,0 +1,23 @@
+services:
+  server:
+    build: ./backend
+    container_name: birdlens-backend
+    ports:
+      - "4000:4000"
+    networks:
+      - birdlens-net
+    env_file:
+      - ./backend/.env
+    restart: unless-stopped
+  service:
+    build: ./ML_service
+    container_name: birdlens-ml
+    ports:
+      - "8000:8000"
+    networks:
+      - birdlens-net
+    restart: unless-stopped
+
+networks:
+  birdlens-net:
+    driver: bridge
