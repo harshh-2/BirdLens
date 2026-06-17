@@ -662,14 +662,9 @@ These are the highest-value architecture decisions to discuss in placement inter
 | Why history doesn't store user images | Privacy, normalization, what "history" actually means as a product feature |
 
 ---
-
 ## 👤 About
 
 Built by **Harsh** — 2nd year CSE (Software Engineering), SRMIST.
-
-Targeting SDE roles at Indian product companies (Groww, Zepto, Razorpay, Flipkart, Swiggy).
-
-Demonstrates end-to-end system thinking: ML model → production microservice → REST orchestration → mobile client → cloud infrastructure.
 
 ---
 
