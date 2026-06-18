@@ -19,22 +19,37 @@
 
 ## 📸 Screenshots
 
-| Onboarding | Sign In | Home | Scan |
-|:---:|:---:|:---:|:---:|
-| ![Onboarding]() | ![Sign In](<img width="1080" height="2392" alt="signin" src="https://github.com/user-attachments/assets/649df861-5aee-4159-914e-75fa01b85513" />
-) | ![Home](<img width="1080" height="2392" alt="home" src="https://github.com/user-attachments/assets/ad13c9cd-061f-4766-978c-8f0942da5df4" />
-) | ![Scan](<img width="1080" height="2392" alt="pred" src="https://github.com/user-attachments/assets/b0011cf4-f505-4235-8bb0-efbdc809c548" />
-) |
+<table>
+  <tr>
+    <th>Onboarding</th>
+    <th>Sign In</th>
+    <th>Home</th>
+    <th>Scan</th>
+  </tr>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/e37f6af2-28b3-4c0e-a1b3-2b7816dbe6d7" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/649df861-5aee-4159-914e-75fa01b85513" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/ad13c9cd-061f-4766-978c-8f0942da5df4" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/b0011cf4-f505-4235-8bb0-efbdc809c548" width="220"></td>
+  </tr>
 
-| Prediction Result | Bird Details | Favorites | History |
-|:---:|:---:|:---:|:---:|
-| ![Result](<img width="1080" height="2392" alt="bird" src="https://github.com/user-attachments/assets/0cd71ec6-53d7-42cc-8a7b-658a6b3cde40" />
-) | ![Details](<img width="1080" height="2392" alt="bird2" src="https://github.com/user-attachments/assets/7d710a99-0bcf-40c6-a6e3-243a1ab47aaf" />
-) | ![Favorites](<img width="1080" height="2392" alt="favs" src="https://github.com/user-attachments/assets/015d0406-e610-4aba-84e6-cdf169912197" />
-) | ![History](<img width="1080" height="2392" alt="history" src="https://github.com/user-attachments/assets/cfe93a4d-ec4b-4105-94b9-94822bed1c34" />
-) |
+  <tr>
+    <th>Prediction Result</th>
+    <th>Bird Details</th>
+    <th>Favorites</th>
+    <th>History</th>
+  </tr>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/0cd71ec6-53d7-42cc-8a7b-658a6b3cde40" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/7d710a99-0bcf-40c6-a6e3-243a1ab47aaf" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/015d0406-e610-4aba-84e6-cdf169912197" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/cfe93a4d-ec4b-4105-94b9-94822bed1c34" width="220"></td>
+  </tr>
+</table>
 
 ---
+
+
 
 ## ⬇️ Download
 
@@ -42,7 +57,7 @@
 
 | Platform | Link |
 |----------|------|
-| 🤖 Android APK | [**Download Latest APK**](#https://github.com/harshh-2/BirdLens/releases/tag/birdlens-latest) |
+| 🤖 Android APK | [**Download Latest APK**](https://github.com/harshh-2/BirdLens/releases/tag/birdlens-latest) |
 
 </div>
 
