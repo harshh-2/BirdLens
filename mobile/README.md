@@ -29,30 +29,57 @@
 
 ## 📸 Screenshots
 
-> **App screenshots coming soon** — Flutter build in progress.
+<table>
+  <tr>
+    <th>Onboarding</th>
+    <th>Sign In</th>
+    <th>Home</th>
+    <th>Scan</th>
+  </tr>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/e37f6af2-28b3-4c0e-a1b3-2b7816dbe6d7" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/649df861-5aee-4159-914e-75fa01b85513" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/ad13c9cd-061f-4766-978c-8f0942da5df4" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/b0011cf4-f505-4235-8bb0-efbdc809c548" width="220"></td>
+  </tr>
 
-| Onboarding | Sign In | Home | Scan |
-|:---:|:---:|:---:|:---:|
-| ![Onboarding](screenshots/placeholder_onboarding.png) | ![Sign In](screenshots/placeholder_signin.png) | ![Home](screenshots/placeholder_home.png) | ![Scan](screenshots/placeholder_scan.png) |
-| *Welcome flow* | *Auth screen* | *Main navigation* | *Camera/gallery picker* |
+  <tr>
+    <th>Prediction Result</th>
+    <th>Bird Details</th>
+    <th>Favorites</th>
+    <th>History</th>
+  </tr>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/0cd71ec6-53d7-42cc-8a7b-658a6b3cde40" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/7d710a99-0bcf-40c6-a6e3-243a1ab47aaf" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/015d0406-e610-4aba-84e6-cdf169912197" width="220"></td>
+    <td><img src="https://github.com/user-attachments/assets/cfe93a4d-ec4b-4105-94b9-94822bed1c34" width="220"></td>
+  </tr>
 
-| Result | Bird Details | Favorites | History |
-|:---:|:---:|:---:|:---:|
-| ![Result](screenshots/placeholder_result.png) | ![Details](screenshots/placeholder_details.png) | ![Favorites](screenshots/placeholder_favorites.png) | ![History](screenshots/placeholder_history.png) |
-| *Prediction + confidence* | *Species info + S3 image* | *Saved birds* | *Prediction log* |
+  <tr>
+    <th colspan="4">Profile</th>
+  </tr>
+  <tr>
+    <td colspan="4" align="center">
+      <img src="https://github.com/user-attachments/assets/89741b2a-d987-46e2-9064-ea452caeb759" width="220">
+    </td>
+  </tr>
+</table>
 
 ---
 
 ## ⬇️ Download
 
+<div align="center">
+
 | Platform | Link |
 |----------|------|
-| Android APK | 📦 [Download latest APK](releases/birdlens-latest.apk) *(coming soon)* |
-| iOS TestFlight | 🍎 TestFlight link coming soon |
+| 🤖 Android APK | [**Download Latest APK**](https://github.com/harshh-2/BirdLens/releases/download/birdlens-latest/app-release.apk) |
 
-> **Note:** Android APK requires enabling "Install from unknown sources" in device settings.
+</div>
 
----
+> Android: Enable "Install from unknown sources" in Settings → Security before installing.
+
 
 ## ✨ Features
 
