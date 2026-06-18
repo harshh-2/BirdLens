@@ -57,7 +57,7 @@
 
 | Platform | Link |
 |----------|------|
-| 🤖 Android APK | [**Download Latest APK**](https://github.com/harshh-2/BirdLens/releases/tag/birdlens-latest) |
+| 🤖 Android APK | [**Download Latest APK**](https://github.com/harshh-2/BirdLens/releases/download/birdlens-latest/app-release.apk) |
 
 </div>
 
