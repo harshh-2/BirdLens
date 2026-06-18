@@ -45,9 +45,19 @@
     <td><img src="https://github.com/user-attachments/assets/015d0406-e610-4aba-84e6-cdf169912197" width="220"></td>
     <td><img src="https://github.com/user-attachments/assets/cfe93a4d-ec4b-4105-94b9-94822bed1c34" width="220"></td>
   </tr>
+
+  <tr>
+    <th colspan="4">Profile</th>
+  </tr>
+  <tr>
+    <td colspan="4" align="center">
+      <img src="https://github.com/user-attachments/assets/89741b2a-d987-46e2-9064-ea452caeb759" width="220">
+    </td>
+  </tr>
 </table>
 
 ---
+
 
 
 
