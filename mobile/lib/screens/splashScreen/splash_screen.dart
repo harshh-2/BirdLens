@@ -24,16 +24,24 @@ class _SplashScreenState
     await Future.delayed(
       const Duration(seconds: 2),
     );
-    await ref
-      .read(
-        authProvider.notifier,
-      )
-      .checkAuth();
-    if (!mounted) return;
-    Navigator.pushReplacementNamed(
-  context,
-  "/auth",
-);
+
+    try {
+      await ref
+          .read(
+            authProvider.notifier,
+          )
+          .checkAuth();
+    } catch (e, st) {
+      debugPrint('Splash _checkAuth error: $e');
+      debugPrint('$st');
+    } finally {
+      if (!mounted) return;
+      // Always navigate to the auth gate so the app can decide next screen.
+      Navigator.pushReplacementNamed(
+        context,
+        "/auth",
+      );
+    }
   }
   @override
   Widget build(BuildContext context) {

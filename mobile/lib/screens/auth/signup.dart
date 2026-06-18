@@ -37,7 +37,7 @@ class _SignUpState extends ConsumerState<SignUp> {
       child:Column(
           crossAxisAlignment: CrossAxisAlignment.start,
         children:[
-          Center(child:Image.asset('assets/images/parrot.png',fit:BoxFit.fitWidth,height:180.h ,),),
+          Center(child:Image.asset('assets/images/Parrot.png',fit:BoxFit.fitWidth,height:180.h ,),),
           Center(
             child:Normal16Text(text: "Use your email to sign up!"),
           ),

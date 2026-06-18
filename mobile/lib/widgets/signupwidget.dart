@@ -96,7 +96,7 @@ Widget appTextfield({required String boxtitle,  required TextEditingController c
 }
 
 BoxDecoration appBoxDecorationTextField(
-{double radius = 15, sR=1, bR=2})
+{double radius = 15, double sR=1, double bR=2})
  {
 return BoxDecoration(
 color: colors['card']!,

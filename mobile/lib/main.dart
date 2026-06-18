@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/Welcome/welcome.dart';
 import 'package:birdlens/screens/auth/signin.dart';
@@ -15,7 +16,22 @@ import 'package:birdlens/screens/navigation/navigation.dart';
 import 'package:birdlens/screens/auth_gate.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
+    try {
+    await dotenv.load(fileName: ".env");
+    debugPrint("ENV LOADED");
+  } catch (e) {
+    debugPrint("ENV ERROR: $e");
+  }
+
+    FlutterError.onError = (details) {
+      debugPrint('FlutterError: ${details.exceptionAsString()}');
+      FlutterError.dumpErrorToConsole(details);
+    };
+
+    PlatformDispatcher.instance.onError = (error, stack) {
+      debugPrint('Uncaught error: $error\n$stack');
+      return true;
+    };
   runApp(
     const ProviderScope(
       child: MyApp(),
@@ -41,7 +57,7 @@ class MyApp extends ConsumerWidget {
       routes: {
         "/splash" :(context)=> SplashScreen(),
         "/auth": (context) => const AuthGate(),
-        "/": (context)=> WelcomeScreen() ,
+        "/": (context)=>  WelcomeScreen(),
         "/main": (context) => const MainNavigation(),
         "/signIn" : (context)=>const SignIn(),
         "/signUp" : (context)=>const SignUp(),

@@ -5,16 +5,21 @@ import 'package:birdlens/services/secure_storage_service.dart';
 class DioClient {
   DioClient._();
 
-  static final Dio dio = Dio(
-    BaseOptions(
-      baseUrl: ApiConstants.baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    ),
-  )..interceptors.add(
+  static late final Dio dio = _createDio();
+
+  static Dio _createDio() {
+    final dio = Dio(
+      BaseOptions(
+        baseUrl: ApiConstants.baseUrl,
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      ),
+    );
+
+    dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (
           options,
@@ -31,15 +36,16 @@ class DioClient {
           }
 
           handler.next(options);
-          
         },
-    onError: (error, handler) async {
-  if (error.response?.statusCode == 401) {
-    await SecureStorageService.deleteToken();
-  }
-  handler.next(error);
-}
+        onError: (error, handler) async {
+          if (error.response?.statusCode == 401) {
+            await SecureStorageService.deleteToken();
+          }
+          handler.next(error);
+        },
       ),
     );
-    
+
+    return dio;
+  }
 }

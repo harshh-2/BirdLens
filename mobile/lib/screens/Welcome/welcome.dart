@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:birdlens/themes/app_colors.dart';
 import 'package:birdlens/widgets/widgets.dart';
-import 'package:birdlens/screens/auth/signin.dart';
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({Key? key}) : super(key: key);
   @override
