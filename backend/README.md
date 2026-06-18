@@ -1,229 +1,433 @@
-# 🦅 BirdLens — Backend Service
+# 🖥️ BirdLens — Backend API
 
-> **Mobile-facing orchestration API** — authenticates users, routes predictions, enriches bird metadata, and delivers private images through temporary signed URLs.
-
----
-
-## What This Service Does
-
-```
-Mobile App  ──▶  Express API  ──▶  FastAPI ML Service
-                     │
-                     ├──▶  Neon PostgreSQL   (users, birds, favorites, history)
-                     └──▶  Private AWS S3    (representative bird images)
-```
-
-The backend is the system's connective tissue. It does not run the ML model — it orchestrates the complete prediction workflow, owns all relational data, and keeps storage implementation details invisible to clients.
+> **Node.js / Express orchestration layer that owns authentication, prediction coordination, PostgreSQL persistence, favorites, history, and private AWS S3 image delivery. The single public-facing entry point between the Flutter app and all backend systems.**
 
 ---
 
-## Contents
+## 📑 Table of Contents
 
-- [Responsibilities](#responsibilities)
-- [Architecture & Request Flow](#architecture--request-flow)
-- [Project Structure](#project-structure)
-- [API Reference](#api-reference)
-- [Authentication](#authentication)
-- [Database Schema](#database-schema)
-- [Prediction Orchestration](#prediction-orchestration)
-- [S3 & Response Enrichment](#s3--response-enrichment)
-- [Configuration](#configuration)
-- [Development & Operations](#development--operations)
-- [Security & Improvement Priorities](#security--improvement-priorities)
-
----
-
-## Responsibilities
-
-**Owns:**
-
-| Domain | Details |
-|---|---|
-| Identity | Registration, login, `/me` lookup, JWT creation & verification |
-| Public API | REST endpoints consumed by the Flutter mobile app |
-| Persistence | Database access through Drizzle ORM |
-| Prediction routing | Bridges client uploads to the FastAPI ML service |
-| Bird metadata | Resolves ML class strings to canonical species records |
-| History | Append-only prediction event log per user |
-| Favorites | Create, list, and delete user-to-bird relationships |
-| Image delivery | Signs private S3 object keys into temporary URLs |
-
-**Does not own:** model training, inference internals, or user-uploaded image storage.
+- [Role in the System](#-role-in-the-system)
+- [Quick Start](#-quick-start)
+- [Architecture](#️-architecture)
+- [Project Structure](#-project-structure)
+- [Request Lifecycle Pattern](#-request-lifecycle-pattern)
+- [Authentication System](#-authentication-system)
+- [Database Design](#️-database-design)
+- [API Reference](#-api-reference)
+- [Prediction Pipeline](#-prediction-pipeline)
+- [Favorites System](#-favorites-system)
+- [History System](#-history-system)
+- [AWS S3 & Signed URLs](#-aws-s3--signed-urls)
+- [Bird Metadata Enrichment](#-bird-metadata-enrichment)
+- [Environment Variables](#-environment-variables)
+- [Docker](#-docker)
+- [Deployment on Render](#-deployment-on-render)
+- [Security Review](#-security-review)
+- [Scalability Notes](#-scalability-notes)
+- [Known Limitations & Roadmap](#-known-limitations--roadmap)
+- [Troubleshooting](#-troubleshooting)
 
 ---
 
-## Architecture & Request Flow
+## 🔍 Role in the System
+
+The Express backend is the **central orchestration layer**. It presents one stable API to Flutter and hides all internal complexity:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    REQUEST LIFECYCLE                         │
-│                                                             │
-│   Express Route                                             │
-│       │                                                     │
-│       ▼                                                     │
-│   Middleware ──── protectRoute (JWT verify)                 │
-│       │      └─── Multer (memory storage, no disk)         │
-│       │                                                     │
-│       ▼                                                     │
-│   Controller                                                │
-│       ├──▶  Drizzle / Neon PostgreSQL                       │
-│       ├──▶  ML Service Client  ──▶  FastAPI /api/predict/   │
-│       └──▶  Bird Enrichment Utility                         │
-│                  └──▶  S3 Signing Service (1-hour URLs)     │
-│       │                                                     │
-│       ▼                                                     │
-│   JSON Response                                             │
-└─────────────────────────────────────────────────────────────┘
+Flutter App (only talks to this service)
+       │
+       │  HTTPS + Bearer JWT
+       ▼
+┌────────────────────────────────────────────┐
+│        Node.js / Express API               │
+│                                            │
+│  ✅  JWT authentication & authorization    │
+│  ✅  Drizzle ORM → Neon PostgreSQL         │
+│  ✅  Multipart → FastAPI ML service        │
+│  ✅  AWS S3 signed URL generation          │
+│  ✅  History & favorites persistence       │
+│  ✅  Bird metadata enrichment              │
+│  ✅  Response contract enforcement         │
+└────────────────────────────────────────────┘
+       │                   │                  │
+       ▼                   ▼                  ▼
+  FastAPI ML          Neon PostgreSQL    Private AWS S3
+  Inference           (Drizzle ORM)     (Signed URLs)
 ```
 
-### Prediction request — step by step
-
-```
-POST /api/birds/predict
-  ① protectRoute verifies Bearer JWT
-  ② Multer stores image bytes in memory (never on disk)
-  ③ birds.controller forwards buffer to FastAPI as multipart
-  ④ FastAPI returns { bird: "Baird_Sparrow", confidence: 99.25 }
-  ⑤ Controller looks up matching row in birds table
-  ⑥ birdResponse signs aws_image_key → image_url (1 hour)
-  ⑦ Controller inserts history event for authenticated user
-  ⑧ Enriched response returned to client
-```
+> The Express API is the **only** intended public entry point. FastAPI, PostgreSQL, and S3 are private to it.
 
 ---
 
-## Project Structure
+## ⚡ Quick Start
+
+```bash
+# 1. Navigate to backend
+cd backend
+
+# 2. Install dependencies
+npm install
+
+# 3. Set up environment (copy and fill in your values)
+cp .env.example .env
+
+# 4. Run database migrations
+npx drizzle-kit migrate
+
+# 5. Seed bird metadata
+node src/scripts/seed.js
+
+# 6. Start development server
+npm run dev
+```
+
+Health check:
+
+```bash
+curl http://localhost:5001/api/health
+# → { "message": "Server is running successfully" }
+```
+
+> The FastAPI ML service must be running separately (default: `http://localhost:8000`) for predictions to work.
+
+---
+
+## 🏗️ Architecture
+
+### Layered Request Pattern
+
+Every request flows through the same consistent pipeline:
+
+```
+HTTP Request
+     │
+     ▼
+┌─────────────┐
+│   Routes    │  auth.routes.js / birds.routes.js / favorites.routes.js / history.routes.js
+│             │  Defines method + path + middleware composition
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  Middleware │  auth.middleware.js  →  verifies JWT, sets req.user
+│             │  upload.middleware.js →  Multer memory storage, sets req.file
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ Controllers │  auth / birds / favorites / history controllers
+│             │  Orchestrates: validate → query → call services → enrich → respond
+└──────┬──────┘
+       │
+       ├───────────────────────────────┐
+       ▼                               ▼
+┌─────────────┐                ┌──────────────┐
+│  Services   │                │  Drizzle ORM │
+│             │                │              │
+│ ml.service  │                │  Neon        │
+│ s3.service  │                │  PostgreSQL  │
+└──────┬──────┘                └──────────────┘
+       │
+       ▼
+   FastAPI / AWS S3
+
+       │
+       ▼
+┌─────────────┐
+│   Utils     │  generateTokens.js  →  JWT signing
+│             │  birdResponse.js    →  enrichBird() / enrichBirds()
+└─────────────┘
+```
+
+### Component Responsibilities
+
+| File/Folder | Who calls it | What it does |
+|------------|-------------|--------------|
+| `server.js` | Uvicorn/Render | App factory, CORS, JSON parsing, route mounting, health endpoint, cron |
+| `config/env.js` | All | Typed environment variable access |
+| `config/db.js` | ORM | Drizzle + Neon serverless client setup |
+| `config/cron.js` | server.js (production) | 14-min keep-alive ping |
+| `routes/*.js` | server.js | HTTP method/path/middleware declarations |
+| `controllers/*.js` | Routes | Use-case orchestration + response |
+| `middleware/auth.middleware.js` | Protected routes | JWT verification, `req.user` injection |
+| `middleware/upload.middleware.js` | Prediction route | Multer memory-mode file parsing |
+| `services/ml.service.js` | Birds controller | Multipart → FastAPI → prediction JSON |
+| `services/s3.service.js` | enrichBird() | GetObject → signed URL |
+| `utils/generateTokens.js` | Auth controller | Signs JWT with 7-day expiry |
+| `utils/birdResponse.js` | All controllers returning birds | Strips `aws_image_key`, injects `image_url` |
+| `db/schema.js` | Drizzle | Table + column + constraint definitions |
+| `db/migrations/` | Drizzle Kit | Applied SQL migrations |
+| `seed/birds.js` | seed.js script | 50-species metadata payloads |
+| `scripts/seed.js` | Manual/CI | Updates existing bird records with metadata |
+
+---
+
+## 📁 Project Structure
 
 ```
 backend/
-├── src/
-│   ├── config/
-│   │   ├── cron.js          ← Production keep-alive (every 14 min)
-│   │   ├── db.js            ← Neon HTTP client + Drizzle instance
-│   │   └── env.js           ← Single ENV object from process.env
-│   │
-│   ├── controllers/
-│   │   ├── auth.controller.js       ← Signup, login, /me
-│   │   ├── birds.controller.js      ← Bird details + prediction
-│   │   ├── favorites.controller.js  ← Add / list / remove
-│   │   └── history.controller.js    ← List + bulk delete
-│   │
-│   ├── db/
-│   │   ├── migrations/      ← Versioned PostgreSQL SQL files
-│   │   └── schema.js        ← Current Drizzle schema (source of truth)
-│   │
-│   ├── middleware/
-│   │   ├── auth.middleware.js    ← Bearer token → req.user
-│   │   └── upload.middleware.js  ← Multer memory storage
-│   │
-│   ├── routes/              ← Express route definitions
-│   │
-│   ├── scripts/
-│   │   └── seed.js          ← Updates existing bird rows by name
-│   │
-│   ├── seed/
-│   │   └── birds.js         ← Curated metadata for 50 species
-│   │
-│   ├── services/
-│   │   ├── ml.service.js    ← Multipart FormData → FastAPI client
-│   │   └── s3.service.js    ← GetObject signed URL (3600s)
-│   │
-│   ├── utils/
-│   │   ├── birdResponse.js      ← Hides aws_image_key, emits image_url
-│   │   └── generateTokens.js    ← 7-day JWT generator
-│   │
-│   └── server.js            ← Express composition root
 │
-├── drizzle.config.js        ← Drizzle Kit config
+├── Dockerfile                    # Container image (Node.js runtime)
 ├── package.json
-└── package-lock.json
+├── drizzle.config.js             # Drizzle Kit migration config
+│
+└── src/
+    ├── server.js                 # App factory, CORS, routes, cron, health
+    │
+    ├── config/
+    │   ├── env.js                # Runtime environment variables
+    │   ├── db.js                 # Drizzle + Neon connection
+    │   └── cron.js               # Production keep-alive scheduler
+    │
+    ├── routes/
+    │   ├── auth.routes.js        # /api/auth/*
+    │   ├── birds.routes.js       # /api/birds/*
+    │   ├── favorites.routes.js   # /api/favorites
+    │   └── history.routes.js     # /api/history
+    │
+    ├── controllers/
+    │   ├── auth.controller.js    # signup, login, me
+    │   ├── birds.controller.js   # predict, getById
+    │   ├── favorites.controller.js # add, list, remove
+    │   └── history.controller.js # list, delete
+    │
+    ├── middleware/
+    │   ├── auth.middleware.js    # verifyJWT → req.user
+    │   └── upload.middleware.js  # Multer memory → req.file
+    │
+    ├── services/
+    │   ├── ml.service.js         # Posts image buffer to FastAPI
+    │   └── s3.service.js         # Generates signed GetObject URLs
+    │
+    ├── utils/
+    │   ├── generateTokens.js     # JWT signing (7-day expiry)
+    │   └── birdResponse.js       # enrichBird() / enrichBirds()
+    │
+    ├── db/
+    │   ├── schema.js             # Drizzle table definitions
+    │   └── migrations/           # SQL migration files
+    │
+    ├── seed/
+    │   └── birds.js              # 50-species metadata payloads
+    │
+    └── scripts/
+        └── seed.js               # Metadata update runner
 ```
-
-### Key file guide
-
-| File | Behaviour that matters |
-|---|---|
-| `src/server.js` | Enables CORS/JSON, starts cron in production, mounts route groups, exposes `/api/health` |
-| `src/config/env.js` | Reads all env vars into one `ENV` object — no `process.env` scattered through the codebase |
-| `src/config/db.js` | Neon HTTP client + Drizzle with full schema |
-| `src/config/cron.js` | Pings `API_URL` and `ML_SERVICE` every 14 minutes in production to prevent cold starts |
-| `src/db/schema.js` | Defines users, birds, favorites, history — all constraints and the history user index |
-| `src/services/ml.service.js` | Converts Multer buffer + filename to `FormData` and posts to `${ML_SERVICE}/api/predict/` |
-| `src/services/s3.service.js` | `GetObjectCommand` + `getSignedUrl(..., { expiresIn: 3600 })` |
-| `src/utils/birdResponse.js` | Strips `aws_image_key`, injects `image_url`; signs lists concurrently with `Promise.all` |
-| `src/scripts/seed.js` | Updates bird metadata by exact `name` match — run only after rows exist |
 
 ---
 
-## API Reference
+## 🔄 Request Lifecycle Pattern
 
-Base path: `/api`
+All four resource domains follow the same controller pattern:
 
-### Authentication
+```
+1. Extract input from req.body / req.params / req.file / req.user
+        │
+2. Validate required fields (manual or schema-based)
+        │
+3. Query PostgreSQL via Drizzle ORM
+        │
+4. Call external services if needed (ML / S3)
+        │
+5. Transform result through enrichment utility
+        │
+6. Return JSON response with appropriate status
+```
 
-#### `POST /auth/signup` — Public
+---
 
-Normalizes email to lowercase, trims username, validates input, hashes password with bcrypt, creates user, returns JWT.
+## 🔐 Authentication System
 
-**Request body:**
+### Registration Flow
+
+```
+POST /api/auth/signup
+       │
+       ├─ Trim username, normalize email to lowercase
+       ├─ Validate: username (3-20 chars), email format (≤254 chars), password (6-25 chars)
+       │   password requires uppercase + lowercase + digit
+       │   allowed chars: letters, digits, @, -
+       │
+       ├─ Check email uniqueness in users table
+       │
+       ├─ bcrypt.hash(password, saltRounds=10)
+       │
+       ├─ INSERT into users
+       │
+       ├─ generateToken(user.id) → 7-day JWT
+       │
+       └─ Return { message, token, user: { id, email, username } }
+```
+
+### Login Flow
+
+```
+POST /api/auth/login
+       │
+       ├─ Normalize email
+       ├─ Query user by email
+       ├─ bcrypt.compare(password, hash)
+       │   ← Same error message for "user not found" and "wrong password"
+       │     prevents account enumeration
+       │
+       └─ Return { token, user: { id, email, username } }
+```
+
+### JWT Design
+
 ```json
 {
-  "email": "person@example.com",
-  "username": "birder",
-  "password": "Secret1"
+  "id": "<user-uuid>",
+  "iat": "<issued-at-unix>",
+  "exp": "<7-days-later-unix>"
 }
 ```
 
-**Validation rules:**
-- Username: 3–20 characters
-- Password: 6–25 characters, must contain uppercase + lowercase + number; allowed chars are letters, digits, `@`, `-`
+### Auth Middleware
 
-**Success `201`:**
+```
+Authorization: Bearer <token>
+       │
+       ├─ Requires "Bearer " prefix
+       ├─ jsonwebtoken.verify(token, JWT_SECRET)
+       ├─ Places decoded payload on req.user
+       └─ Returns 401 for missing / expired / invalid tokens
+```
+
+> **Key security property:** All protected controllers derive `user_id` from `req.user` (the verified JWT) — never from the request body. A user cannot access another user's resources by changing an ID.
+
+### Session Boot (Flutter side)
+
+```
+App starts
+    │
+    ├─ Read token from flutter_secure_storage
+    │
+    ├─ If token exists: GET /api/auth/me
+    │     ├─ Valid  → enter /main
+    │     └─ Invalid → delete token → go to sign-in
+    │
+    └─ No token → go to welcome
+```
+
+---
+
+## 🗄️ Database Design
+
+### Entity Relationship Diagram
+
+```
+USERS ──────────────────────────────────────────────────────────
+  id (UUID, PK)             ──┐
+  username (text, not null)   │
+  email (text, unique)        │  1:N
+  password_hash (text)        │
+  created_at (timestamp)      ├──── FAVORITES
+  updated_at (timestamp)      │      user_id (UUID, FK, composite PK) ──┐
+                              │      bird_id (UUID, FK, composite PK) ──┤
+                              │      created_at                          │
+                              │                                          │
+                              ├──── HISTORY                             │
+                              │      id (serial, PK)                    │
+                              │      user_id (UUID, FK, indexed)        │
+                              │      bird_id (UUID, FK)  ───────────────┤
+                              │      confidence (real)                   │
+                              │      predicted_at (timestamp)           │
+                              │                                          │
+BIRDS ──────────────────────────────────────────────────────────         │
+  id (UUID, PK) ─────────────────────────────────────────────────────────┘
+  name (text, unique)         ← Must exactly match ML class_names.json
+  description (text, null)
+  scientific_name (text, null)
+  habitat (text, null)
+  conservation_status (text, null)
+  aws_image_key (text, null)  ← Never returned to client; replaced by image_url
+```
+
+### Table Decisions
+
+| Decision | Detail |
+|---------|--------|
+| UUIDs for user/bird IDs | Non-sequential, safe to expose in APIs |
+| Composite PK on favorites `(user_id, bird_id)` | Duplicate prevention is atomic — no race condition |
+| `birds.name` must match ML class exactly | Cross-system invariant — any mismatch silently breaks enrichment |
+| No `aws_image_key` on history | User photos not stored; history references canonical `birds` record |
+| `history_user_idx` on `history.user_id` | Fast per-user history queries |
+
+### Migration History
+
+| Migration | Change |
+|-----------|--------|
+| `0000` | Created `users`, `birds`, `favorites`, `history` with FK constraints |
+| `0001` | Added `confidence`, `user_image_key` to history, renamed timestamp |
+| `0002` | Renamed `image_key` → `aws_image_key`, added `history_user_idx` |
+| `0003` | **Dropped `user_image_key`** — finalized privacy decision |
+
+### Drizzle ORM Pattern
+
+```javascript
+// Prediction history insert
+await db.insert(history).values({
+  user_id: req.user.id,
+  bird_id: foundBird.id,
+  confidence: prediction.confidence,
+});
+
+// History retrieval with join
+const rows = await db
+  .select()
+  .from(history)
+  .innerJoin(birds, eq(history.bird_id, birds.id))
+  .where(eq(history.user_id, req.user.id))
+  .orderBy(desc(history.predicted_at));
+```
+
+---
+
+## 📡 API Reference
+
+All routes are under `/api`.
+
+### Health
+
+| Method | Path | Auth | Response |
+|--------|------|------|----------|
+| `GET` | `/api/health` | None | `{ "message": "Server is running successfully" }` |
+
+### Authentication
+
+| Method | Path | Auth | Body |
+|--------|------|------|------|
+| `POST` | `/api/auth/signup` | None | `{ username, email, password }` |
+| `POST` | `/api/auth/login` | None | `{ email, password }` |
+| `GET` | `/api/auth/me` | Bearer JWT | None |
+
+**Signup success `201`:**
 ```json
 {
   "message": "User created successfully",
   "token": "<jwt>",
-  "user": {
-    "id": "<uuid>",
-    "email": "person@example.com",
-    "username": "birder"
-  }
+  "user": { "id": "<uuid>", "email": "...", "username": "..." }
 }
 ```
 
----
-
-#### `POST /auth/login` — Public
-
-Verifies email and password. Returns the same safe user summary + fresh JWT. Unknown email and wrong password both return the generic `Invalid Credentials` response (no user enumeration).
-
----
-
-#### `GET /auth/me` — Protected
-
-Returns `{ id, username, email }` for the JWT subject. No password hash, no internal IDs beyond `id`.
-
----
-
-### Birds & Prediction
-
-#### `GET /birds/:bird_id` — Public
-
-Fetches one species by UUID. The stored `aws_image_key` is replaced with a 1-hour `image_url`. Raw S3 key is never exposed.
-
----
-
-#### `POST /birds/predict` — Protected
-
-Accepts `multipart/form-data`. The file field must be named `image`.
-
+**Password validation rules:**
 ```
-Authorization: Bearer <jwt>
-Content-Type: multipart/form-data
-image: <binary>
+Length:       6–25 characters
+Requirements: ≥1 uppercase + ≥1 lowercase + ≥1 digit
+Allowed:      letters, digits, @, -
 ```
 
-**Response:**
+### Birds
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `GET` | `/api/birds/:bird_id` | None | Fetch one enriched bird record |
+| `POST` | `/api/birds/predict` | Bearer JWT | Predict + enrich + record history |
+
+**`POST /api/birds/predict`** — Content-Type: `multipart/form-data`, field: `image`
+
+**Success `200`:**
 ```json
 {
   "bird": {
@@ -233,284 +437,505 @@ image: <binary>
     "scientific_name": "Centronyx bairdii",
     "habitat": "...",
     "conservation_status": "...",
-    "image_url": "<signed-s3-url-valid-1h>"
+    "image_url": "<temporary-s3-signed-url>"
   },
   "confidence": 99.25,
   "is_confident": true
 }
 ```
 
-A history row is inserted for the authenticated user on every successful prediction.
-
----
-
 ### Favorites
 
-All routes are protected. User identity comes from the JWT — never from a request body field.
+| Method | Path | Auth | Body |
+|--------|------|------|------|
+| `POST` | `/api/favorites` | Bearer JWT | `{ "bird_id": "<uuid>" }` |
+| `GET` | `/api/favorites` | Bearer JWT | None |
+| `DELETE` | `/api/favorites` | Bearer JWT | `{ "bird_id": "<uuid>" }` |
 
-| Method | Path | Body | Description |
-|---|---|---|---|
-| `POST` | `/favorites` | `{ "bird_id": "<uuid>" }` | Creates favorite; duplicate pair violates composite PK |
-| `GET` | `/favorites` | — | Returns enriched list with signed `image_url` per bird, or `[]` |
-| `DELETE` | `/favorites` | `{ "bird_id": "<uuid>" }` | Removes the matching favorite for the authenticated user |
-
-The list response includes: bird ID, name, favorite timestamp, and `image_url`.
-
----
+**List `200`:** Array of enriched bird records with `created_at`.
 
 ### History
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/history` | Enriched prediction records, newest first |
-| `DELETE` | `/history` | Deletes every history row owned by the authenticated user |
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `GET` | `/api/history` | Bearer JWT | Newest-first enriched prediction list |
+| `DELETE` | `/api/history` | Bearer JWT | Delete all history for current user |
 
-Each history record contains: `history_id`, `bird_id`, `name`, `confidence`, `predicted_at`, `image_url`.
+**List `200`:** Array of `{ bird, confidence, predicted_at }`.
 
----
+### Status Code Reference
 
-### Health
-
-`GET /api/health` → `200 OK` when the Express process is alive.
-
-> ⚠️ Does not verify database, S3, or ML service health. Suitable for process-alive checks only.
-
----
-
-## Authentication
-
-### Password handling
-
-- Email is trimmed and lowercased on ingestion.
-- Passwords are never returned in any response.
-- bcrypt with `SALT_ROUNDS = 10`.
-- Login errors return a single generic message for both unknown email and wrong password — no user enumeration.
-
-### JWT handling
-
-`generateToken(id)` signs `{ id }` with `JWT_SECRET`, 7-day expiry.
-
-`protectRoute` middleware:
-1. Reads `Authorization: Bearer <token>`
-2. Verifies signature and expiry
-3. Sets `req.user` to the decoded payload
-
-Because controllers use `req.user.id` for all database queries, it is impossible for a caller to access another user's data by crafting a different request body.
-
-### Recommended hardening
-
-- Validate `JWT_SECRET` presence and minimum entropy at startup
-- Add `iss` / `aud` claims and key rotation strategy
-- Implement login throttling and account lockout
-- Define refresh-token or session revocation behaviour
-- Evaluate Argon2id if requirements evolve beyond bcrypt
+| Code | Meaning |
+|------|---------|
+| `200` | OK — read, login, prediction, deletion |
+| `201` | Created — user or favorite created |
+| `400` | Bad request — missing / invalid input |
+| `401` | Unauthorized — missing/expired/invalid JWT or wrong credentials |
+| `404` | Not found — user or bird does not exist |
+| `413` | Payload too large — image exceeds 3 MB (FastAPI) |
+| `500` | Internal server error — unexpected failure |
 
 ---
 
-## Database Schema
+## 🔮 Prediction Pipeline
+
+The full end-to-end prediction flow across all services:
 
 ```
-users ──────────────────────────────────────────
-  id           UUID   PK, random default
-  username     text   not null
-  email        text   not null, unique
-  password_hash text  not null
-  created_at   ts     not null, defaults now
-  updated_at   ts     not null, defaults now
-
-birds ──────────────────────────────────────────
-  id                UUID   PK
-  name              text   not null, unique ← must match ML class string exactly
-  description       text   nullable
-  aws_image_key     text   nullable private S3 key
-  scientific_name   text   nullable
-  habitat           text   nullable
-  conservation_status text nullable
-
-favorites ──────────────────────────────────────
-  user_id    UUID   PK part, FK → users
-  bird_id    UUID   PK part, FK → birds
-  created_at ts     not null, defaults now
-  ↑ composite PK enforces uniqueness at the database level
-
-history ────────────────────────────────────────
-  id           serial  PK
-  user_id      UUID    not null, FK → users, indexed
-  bird_id      UUID    not null, FK → birds
-  confidence   real    not null
-  predicted_at ts      not null, defaults now
+Flutter: User selects/captures image
+       │
+       │  POST /api/birds/predict
+       │  multipart/form-data  +  Authorization: Bearer <jwt>
+       ▼
+Express: auth.middleware.js
+       │  Verifies JWT → req.user.id
+       ▼
+Express: upload.middleware.js (Multer)
+       │  Parses image into memory → req.file.buffer
+       ▼
+Express: birds.controller.js
+       │
+       ├─ ml.service.js:
+       │    FormData with image buffer
+       │    POST http://<ML_SERVICE>/api/predict/
+       │    ← { bird: "Baird_Sparrow", confidence: 99.25, is_confident: true }
+       │
+       ├─ Drizzle: SELECT * FROM birds WHERE name = "Baird_Sparrow"
+       │    ← canonical bird record with aws_image_key
+       │
+       ├─ s3.service.js:
+       │    GetObjectCommand(bucket, "birds/Baird_Sparrow.jpg")
+       │    ← temporary signed URL (1 hour TTL)
+       │
+       ├─ Drizzle: INSERT INTO history (user_id, bird_id, confidence)
+       │
+       └─ enrichBird(): remove aws_image_key, add image_url
+       │
+       ▼
+Flutter: Renders enriched result screen
 ```
 
-### Migration history
+### Prediction Failure Points
 
-| Migration | What changed |
-|---|---|
-| `0000_simple_dexter_bennett.sql` | Created users, birds, favorites, history |
-| `0001_amused_the_fury.sql` | Renamed history timestamp, added confidence and temporary uploaded-image URL column |
-| `0002_premium_ikaris.sql` | Renamed bird image URL to S3 key, renamed user image field, indexed history by user |
-| `0003_unknown_guardian.sql` | Removed user image key — decision not to persist uploads |
+| Stage | Failure | Status |
+|-------|---------|--------|
+| Auth | Missing / expired JWT | 401 |
+| Upload | No file in request | 400 |
+| FastAPI call | Service unavailable / timeout | 502 |
+| FastAPI validation | Bad MIME / too large / corrupt | 400/413 |
+| Bird lookup | Class name not in DB | 404 |
+| S3 signing | Wrong key / bucket / perms | 500 |
+| History insert | DB failure | 500 |
 
-### Normalization rationale
-
-History stores a foreign key to the canonical bird rather than repeating metadata or S3 keys. Favorites do the same. This avoids update anomalies and keeps a single authoritative row per supported species. If a bird's description or image changes, every history and favorite record reflects the update automatically.
-
-### Seeding
-
-`src/seed/birds.js` contains curated metadata for all 50 supported species. `src/scripts/seed.js` performs updates by exact `name` match. Run only after bird rows exist. Note: the script logs "Inserted" but its actual database operation is update-only.
+> User uploads are **never written** to PostgreSQL, S3, or disk — they exist in Express memory only during the request.
 
 ---
 
-## Prediction Orchestration
+## ⭐ Favorites System
 
 ```
-Client image bytes
-    │
-    ▼
-Multer (memory storage — no disk write)
-    │
-    ▼
-ml.service.js — builds FormData with buffer + filename
-    │  POST multipart to ${ML_SERVICE}/api/predict/
-    ▼
-FastAPI response: { bird: "Baird_Sparrow", confidence: 99.25 }
-    │
-    ▼
-Controller looks up birds table by name
-    │   ← class mapping is a cross-service contract:
-    │     class_names.json[index] == prediction.bird == birds.name
-    ▼
-birdResponse.js signs aws_image_key → image_url
-    │
-    ▼
-history insert for req.user.id
-    │
-    ▼
-Enriched JSON response to client
+Add favorite:
+  POST /api/favorites { bird_id }
+       │
+       ├─ user_id from req.user (JWT)
+       ├─ INSERT (user_id, bird_id) into favorites
+       └─ DB composite PK prevents duplicates atomically
+
+List favorites:
+  GET /api/favorites
+       │
+       ├─ SELECT favorites JOIN birds WHERE user_id = req.user.id
+       ├─ enrichBirds() — concurrent signed URL generation via Promise.all
+       └─ Return enriched list
+
+Remove favorite:
+  DELETE /api/favorites { bird_id }
+       │
+       ├─ WHERE user_id = req.user.id AND bird_id = ?
+       └─ A user cannot remove another user's favorites (JWT enforces this)
 ```
 
-> ⚠️ If enrichment or history insertion fails, the entire request returns `500` even if inference succeeded. This is a known gap — see improvement priorities.
+**Why composite primary key over generated row ID?**
+
+```
+PRIMARY KEY (user_id, bird_id)
+
+Benefits:
+✅ Duplicate prevention is atomic — no TOCTOU race condition
+✅ No redundant generated ID needed
+✅ Relationship identity matches domain semantics
+✅ Concurrent requests cannot create duplicate pairs
+
+Note: Map duplicate-key DB errors to 409 Conflict (not 500) — improvement needed.
+```
 
 ---
 
-## S3 & Response Enrichment
+## 📜 History System
 
-The S3 service creates `GetObject` signed URLs using configured credentials and region. URLs expire after **3,600 seconds**.
+```
+Record (after every successful authenticated prediction):
+  INSERT INTO history (user_id, bird_id, confidence, predicted_at)
 
-`enrichBird()` and `enrichBirds()` (used throughout controllers):
+List:
+  SELECT history JOIN birds
+  WHERE history.user_id = req.user.id
+  ORDER BY predicted_at DESC
+  → enrichBirds() for signed URLs
 
-1. Read `aws_image_key` from the database row
-2. Call S3 service to generate a signed URL when a key exists
-3. Delete `aws_image_key` from the response object
-4. Inject `image_url` in its place
+Delete all:
+  DELETE FROM history WHERE user_id = req.user.id
+```
 
-This keeps the private S3 bucket invisible to clients. Signed URLs contain AWS signing metadata — that is by design and is distinct from exposing the secret access key.
+**What history stores vs. doesn't:**
 
-For list responses, `enrichBirds()` fires all signing operations concurrently via `Promise.all`.
-
----
-
-## Configuration
-
-Create a `.env` file in `backend/` — it is gitignored. Never commit real values.
-
-| Variable | Purpose |
-|---|---|
-| `DB_URL` | Neon/PostgreSQL connection string |
-| `PORT` | Express listener port (default: `5001`) |
-| `NODE_ENV` | Set to `production` to activate the keep-alive cron |
-| `API_URL` | Backend URL pinged by production cron |
-| `JWT_SECRET` | JWT signing and verification secret |
-| `ML_SERVICE` | FastAPI base URL (`http://...` without trailing slash) |
-| `AWS_BUCKET_NAME` | Private S3 bucket name |
-| `AWS_REGION` | S3 region (e.g. `us-east-1`) |
-| `AWS_ACCESS_KEY_ID` | S3 identity for local/key-based setups |
-| `AWS_SECRET_ACCESS_KEY` | S3 credential for local/key-based setups |
+| Data | Stored? | Reason |
+|------|---------|--------|
+| Authenticated user ID | ✅ | Ownership |
+| Canonical bird ID | ✅ | Links to metadata |
+| Confidence score | ✅ | Product feature |
+| Prediction timestamp | ✅ | Ordering |
+| User-uploaded photograph | ❌ | Privacy decision |
+| Bird metadata (redundant copy) | ❌ | Normalized — join to birds |
 
 ---
 
-## Development & Operations
+## ☁️ AWS S3 & Signed URLs
 
-### Install and run
+### Bucket Structure
+
+```
+s3://birdlens-bucket/
+└── birds/
+    ├── American_Crow.jpg
+    ├── Anna_Hummingbird.jpg
+    ├── Baird_Sparrow.jpg
+    └── ... (one per supported species)
+```
+
+### Why Signed URLs (not public bucket)?
+
+```
+Option A: Public bucket URLs
+  ❌ Bucket must be public — not safe
+  ❌ Permanent access — can't revoke
+  ✅ Simple to implement
+
+Option B: Proxy through Express
+  ❌ Every image byte goes through Node — high bandwidth cost
+  ❌ Adds latency for every image load
+  ✅ Full access control
+
+Option C: Signed URLs ← BirdLens choice
+  ✅ Bucket stays private
+  ✅ Time-limited access (1 hour TTL)
+  ✅ Client fetches directly from S3 — no proxy bandwidth
+  ✅ No AWS credentials in client
+  ✅ Industry standard for private object delivery
+```
+
+### Signed URL Flow
+
+```
+Express: s3.service.js
+       │
+       ├─ S3Client({ region, credentials })
+       ├─ GetObjectCommand({ Bucket, Key: "birds/Baird_Sparrow.jpg" })
+       └─ getSignedUrl(client, command, { expiresIn: 3600 })
+              │
+              └─ Temporary URL with auth params embedded
+                     │
+                     └─ Client GETs image directly from S3
+```
+
+> Signed URLs include auth metadata (credential scope, expiry, signature) — this is **expected and safe**. The AWS secret access key is never included.
+
+### Response Enrichment
+
+```javascript
+// Internal bird record:
+{ id, name, description, aws_image_key, scientific_name, habitat, conservation_status }
+
+// After enrichBird():
+{ id, name, description, image_url, scientific_name, habitat, conservation_status }
+//  aws_image_key is removed before client response
+```
+
+`enrichBirds()` uses `Promise.all` to sign all images in a list concurrently.
+
+---
+
+## 🐦 Bird Metadata Enrichment
+
+### Cross-System Class Name Invariant
+
+```
+ML class_names.json[index]
+        ==
+FastAPI response: prediction.bird
+        ==
+PostgreSQL birds.name
+        ==
+S3 key: birds/<name>.jpg
+```
+
+> A single character difference (case, underscore, space) causes inference to succeed but metadata enrichment to silently fail — the most dangerous bug category in this system.
+
+### Seeding Metadata
 
 ```bash
-# Install dependencies
-npm install
-
-# Development (nodemon watch)
-npm run dev
-
-# Production
-npm start
+# Update all 50 bird records with metadata
+node src/scripts/seed.js
 ```
 
-### Database migrations
+`seed.js` iterates `seed/birds.js`, matches each entry by exact `birds.name`, and updates `scientific_name`, `description`, `habitat`, and `conservation_status`. Does not insert missing birds — only updates existing rows.
+
+---
+
+## ⚙️ Environment Variables
+
+```env
+# Database
+DB_URL=postgresql://<user>:<pass>@<neon-host>/<db>?sslmode=require
+
+# Server
+PORT=5001
+NODE_ENV=production
+
+# Auth
+JWT_SECRET=<minimum-32-char-random-secret>
+
+# ML Service
+ML_SERVICE=http://localhost:8000        # local
+# ML_SERVICE=https://your-ml.onrender.com  # deployed
+
+# AWS S3
+AWS_BUCKET_NAME=birdlens-images
+AWS_REGION=ap-south-1
+AWS_ACCESS_KEY_ID=<key-id>
+AWS_SECRET_ACCESS_KEY=<secret>
+
+# Keep-alive (Render free tier)
+API_URL=https://your-api.onrender.com/api/health
+```
+
+> Never commit real secrets. Use Render's environment variable panel in production.
+
+---
+
+## 🐳 Docker
+
+### Dockerfile
+
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY src/ ./src/
+
+EXPOSE 5001
+
+CMD ["node", "src/server.js"]
+```
+
+### Docker Compose (Local Multi-Service)
+
+```yaml
+# docker-compose.yml (repo root)
+version: "3.9"
+services:
+
+  backend:
+    build: ./backend
+    ports:
+      - "5001:5001"
+    environment:
+      - DB_URL=${DB_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - ML_SERVICE=http://ml:8000
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - NODE_ENV=development
+    depends_on:
+      - ml
+
+  ml:
+    build: ./ML_service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ML_service/app/models:/app/app/models
+```
+
+**Run everything locally:**
 
 ```bash
-# Generate migration SQL from schema changes
-npx drizzle-kit generate
-
-# Apply pending migrations
-npx drizzle-kit migrate
+# From repo root
+docker compose up --build
 ```
 
-Always review generated SQL before applying to shared or production environments.
+**Individual commands:**
 
-### Smoke test order
+```bash
+# Build only backend
+docker build -t birdlens-backend ./backend
 
-Run these in sequence after any deployment to verify the full stack:
+# Run backend container
+docker run -p 5001:5001 --env-file ./backend/.env birdlens-backend
 
+# Shell into running container
+docker exec -it <container-id> sh
 ```
-1. GET  /api/health              → 200 OK
-2. POST /auth/signup             → 201, token returned
-3. POST /auth/login              → 200, token returned
-4. GET  /auth/me                 → 200, user object (no password)
-5. GET  /birds/:known_uuid       → 200, image_url present
-6. POST /birds/predict (+ image) → 200, enriched bird + confidence
-7. GET  /history                 → 200, contains the prediction above
-8. POST /favorites               → 200, favorite created
-9. GET  /favorites               → 200, list with image_url
-10. DELETE /favorites            → 200, removed
-11. DELETE /history              → 200, all history cleared
-```
-
-### Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| Prediction returns `Bird not found` | ML class string does not exactly match `birds.name`, or row is missing |
-| `image_url` is null | Bird row has no `aws_image_key` |
-| Signed URL returns 403 | Expired URL, wrong key, wrong region/bucket, or missing S3 permission |
-| Prediction returns `500` | ML service unavailable, DB error, signing error, or history insert failure |
-| Protected route returns `401` | Missing, malformed, expired, or incorrectly signed JWT |
-| Duplicate favorite returns `500` | Composite PK violation not yet mapped to `409 Conflict` |
 
 ---
 
-## Security & Improvement Priorities
+## 🚀 Deployment on Render
 
-### Current strengths
+Both services are deployed on Render as Web Services.
 
-- User identity comes from verified JWTs — request body user IDs are ignored
-- Password hashes and all credentials are excluded from every response
-- All SQL goes through Drizzle — no string concatenation
-- S3 stays private; object keys are stripped from API responses
-- User-uploaded images are not intentionally persisted anywhere
+### Backend Render Configuration
 
-### Highest-priority gaps
+| Field | Value |
+|-------|-------|
+| Runtime | Docker |
+| Dockerfile path | `./backend/Dockerfile` |
+| Port | `5001` |
+| Health check | `/api/health` |
 
-1. **Schema validation** — add validation for request params, bodies, and file metadata (e.g. Zod)
-2. **File limits** — add Multer file-size cap and MIME-type allowlist before forwarding to ML service
-3. **Rate limiting + CORS** — restrict origins, add express-rate-limit, add ML service boundary auth
-4. **Centralized error handling** — never return raw `error.message`; use opaque error codes
-5. **Duplicate favorite → 409** — map composite PK violation to a proper conflict response
-6. **ML call reliability** — add timeouts, retries, and circuit-breaking for FastAPI calls
-7. **Testing** — unit tests for controllers and utils; integration tests for prediction flow
-8. **OpenAPI docs** — generate from schema for client contract clarity
-9. **Structured logging + metrics** — replace console.log with structured output; add latency tracking
-10. **Managed identity** — use IAM roles / workload identity in deployment; rotate secrets
-11. **Pagination** — add cursor/offset pagination for history and favorites lists
-12. **Account deletion** — define FK cascade behaviour and a formal account deletion flow
+**Environment variables:** Set all from `.env` in Render dashboard.
+
+### Deployment Order
+
+```
+1. Deploy Neon PostgreSQL (already managed/hosted)
+2. Run migrations: npx drizzle-kit migrate
+3. Seed bird records: node src/scripts/seed.js
+4. Upload representative images to S3 bucket
+5. Deploy FastAPI ML service on Render (get its URL)
+6. Deploy Express backend on Render (set ML_SERVICE to FastAPI URL)
+7. Smoke test all endpoints
+8. Set API_BASE_URL in Flutter .env → build APK
+```
+
+### Keep-Alive Cron
+
+Render free tier services sleep after inactivity. The backend starts a production-only cron job:
+
+```javascript
+// config/cron.js
+// Pings API_URL and ML_SERVICE/health every 14 minutes
+// Prevents hobby-tier cold starts during active usage
+```
+
+> This is a **hosting workaround**, not a production monitoring strategy.
 
 ---
 
-> The backend is a well-separated portfolio-scale orchestration service. Its next engineering phase is reliability and operational maturity — not more controller features.
+## 🔒 Security Review
+
+### Strengths
+
+```
+✅ Passwords hashed with bcrypt (cost 10)
+✅ Raw passwords never returned or logged
+✅ JWTs expire after 7 days
+✅ Protected resources derive user from verified JWT (not request body)
+✅ Drizzle ORM — no string-built SQL
+✅ S3 bucket is private by design
+✅ Signed URLs replace public object access
+✅ aws_image_key stripped from all client responses
+✅ User uploads never intentionally persisted
+✅ Same error for "user not found" and "wrong password" — no enumeration
+✅ Environment files in .gitignore
+```
+
+### Known Weaknesses
+
+```
+⚠️  CORS is currently permissive (allow all origins)
+⚠️  No rate limiting on auth or prediction endpoints
+⚠️  No Express-level upload size limit (only FastAPI enforces 3 MB)
+⚠️  Some error responses leak internal error.message
+⚠️  No service-to-service auth between Express and FastAPI
+⚠️  AWS uses long-lived access keys (not IAM roles/workload identity)
+⚠️  No JWT refresh or revocation mechanism
+⚠️  No request body schema validation
+⚠️  Duplicate favorites return 500 instead of 409
+```
+
+---
+
+## 📈 Scalability Notes
+
+| Scale | Current fit | What's needed |
+|-------|-------------|---------------|
+| 10–100 users | ✅ Sufficient | Focus on correctness |
+| 1,000 users | ⚠️ Needs work | Rate limiting, pagination, multiple ML workers, metrics |
+| 10,000 users | ❌ Not ready | Horizontal scale, caching, load balancer, Redis, queues, CDN |
+
+Express is **largely stateless** — JWT carries identity, PostgreSQL owns state. Horizontal scaling is straightforward once observability and external dependency handling is solid.
+
+---
+
+## 🗺️ Known Limitations & Roadmap
+
+### Immediate (before any production traffic)
+
+```
+□ Strict CORS allowlist (not allow-all)
+□ Rate limiting on /signup, /login, /predict
+□ Express-level multipart size limit (before buffer fills memory)
+□ Request schema validation (zod or joi)
+□ Map duplicate-key DB errors → 409 Conflict
+□ Centralized error middleware (not per-controller try/catch)
+□ Safe error messages (no internal error.message to client)
+□ Explicit ML service timeout + retry budget
+□ Service-to-service auth between Express and FastAPI
+□ Automated tests (unit + integration)
+```
+
+### Medium Term
+
+```
+□ Pagination for /history and /favorites
+□ Individual history event deletion
+□ JWT refresh + shorter-lived access tokens
+□ Password reset + email verification
+□ Model version in prediction response and history row
+□ Bird metadata admin endpoint
+□ OpenAPI spec generation
+□ Structured logging (correlation IDs)
+□ Metrics and tracing
+```
+
+---
+
+## 🛠️ Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| `Cannot connect to database` | Bad `DB_URL` or missing SSL params | Check `.env`, ensure `?sslmode=require` for Neon |
+| `JWT_SECRET is not defined` | Missing env var | Set `JWT_SECRET` in `.env` |
+| `ML service unavailable` | FastAPI not running | Start FastAPI on port 8000 or check `ML_SERVICE` env |
+| `Bird not found after prediction` | Class name mismatch | Verify `birds.name` matches `class_names.json` exactly |
+| `S3 signed URL fails` | Wrong key/bucket/region/permission | Check `AWS_*` vars; verify `birds/<name>.jpg` exists in bucket |
+| `Duplicate favorite returns 500` | DB unique constraint not mapped | Known issue — map to 409 |
+| `History empty after prediction` | History insert failing silently | Check controller error handling and DB connection |
+| `Service sleeps on Render` | Hobby tier cold start | Check cron keep-alive config; upgrade to paid tier for prod |
+
+---
+
+<div align="center">
+
+**The backend is the system's trust boundary.**
+Everything authenticated, enriched, and secured happens here.
+
+*BirdLens Backend — Part of the BirdLens full-stack AI bird identification system*
+
+</div>
