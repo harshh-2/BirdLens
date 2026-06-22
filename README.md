@@ -565,6 +565,7 @@ Flutter: APK / App Store release
 ```
 ✅ bcrypt password hashing (cost 10) — never stores raw passwords
 ✅ 7-day JWT — resource identity from verified token, not request body
+✅ Express-rate-limiting on auth and predict routes
 ✅ Drizzle ORM — no string-built SQL, parameterized queries
 ✅ Private S3 bucket — public access blocked by bucket policy
 ✅ Signed URLs — time-limited, no AWS credentials in client
@@ -588,10 +589,8 @@ Flutter: APK / App Store release
 
 ```
 ⚠️  CORS is currently permissive (allow all origins)
-⚠️  No rate limiting on auth or prediction endpoints
 ⚠️  FastAPI has no service-to-service authentication
 ⚠️  AWS uses long-lived keys (not IAM roles)
-⚠️  No JWT refresh or revocation
 ```
 
 ---
@@ -645,7 +644,7 @@ Express is stateless (JWT carries identity, PostgreSQL owns state) — horizonta
 ### Short Term
 ```
 □ Automated tests (backend unit + integration, ML contract, Flutter widget)
-□ CORS allowlist, rate limiting, request validation
+□ CORS allowlist,  request validation
 □ Dockerfiles tested, Compose verified end-to-end
 □ CI pipeline (lint + test + build + secret scan)
 □ Structured logging + basic metrics
