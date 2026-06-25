@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:birdlens/themes/app_colors.dart';
-import 'package:birdlens/widgets/widgets.dart';
 import 'package:birdlens/widgets/text_styles.dart';
 import 'package:birdlens/widgets/signupwidget.dart' ;
 import 'package:flutter_screenutil/flutter_screenutil.dart';

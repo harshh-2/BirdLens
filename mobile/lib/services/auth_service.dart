@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import 'package:birdlens/services/dio_client.dart';
 import 'package:birdlens/models/auth_response.dart';
 

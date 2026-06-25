@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../providers/profile_provider.dart';
 import '../../providers/history_provider.dart';
-import 'package:birdlens/widgets/prediction_widget.dart';
-import 'package:birdlens/widgets/prediction_widget.dart';
 import 'package:birdlens/providers/auth_provider.dart';
 class Profile extends ConsumerWidget {
   const Profile({

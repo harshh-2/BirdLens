@@ -89,9 +89,6 @@ Future<void> handlePrediction(
     );
 
   } catch (e) {
-
-    print(e);
-
     if (
       Navigator.of(
         context,

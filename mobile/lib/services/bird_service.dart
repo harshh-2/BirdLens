@@ -25,8 +25,6 @@ class BirdService {
       );
       return response.data;
     } on DioException catch (e) {
-       print("Prediction Error:");
-      print(e.response?.data);
       rethrow;
     }
   }

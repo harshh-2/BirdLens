@@ -18,9 +18,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
     try {
     await dotenv.load(fileName: ".env");
-    debugPrint("ENV LOADED");
   } catch (e) {
-    debugPrint("ENV ERROR: $e");
+    debugPrint("No Clue");
   }
 
     FlutterError.onError = (details) {

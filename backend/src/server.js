@@ -7,9 +7,11 @@ import historyRoutes from './routes/history.routes.js';
 import birdsRoutes from './routes/birds.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js'
+
 const app=express();
 const PORT= ENV.PORT;
 
+app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json());
 
